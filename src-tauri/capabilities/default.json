@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for the Auto-Scraper Agent",
+  "platforms": ["windows", "macOS", "linux"],
+  "windows": ["setup"],
+  "permissions": [
+    "core:default",
+    "shell:allow-execute",
+    "opener:allow-open-url",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}

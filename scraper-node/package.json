@@ -1,0 +1,17 @@
+{
+  "name": "auto-scraper-scraper-node",
+  "version": "0.1.0",
+  "description": "Node.js sidecar for the Auto-Scraper Tauri agent",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build:sea": "node build.mjs",
+    "setup:chromium": "node setup-chromium.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
