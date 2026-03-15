@@ -23,19 +23,35 @@ fn save_config(
     server_url: String,
 ) -> Result<(), String> {
     let body = serde_json::json!({ "apiKey": api_key, "serverUrl": server_url });
-    reqwest::blocking::Client::new()
-        .post("http://127.0.0.1:9001/config")
-        .json(&body)
-        .send()
-        .map_err(|e| format!("Failed to contact sidecar: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("Sidecar returned error: {e}"))?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .map_err(|e| e.to_string())?;
 
-    if let Some(win) = app.get_webview_window("setup") {
-        let _ = win.close();
+    // Retry up to 3 times — sidecar may still be starting.
+    let mut last_err = String::new();
+    for attempt in 0..3u8 {
+        if attempt > 0 {
+            thread::sleep(Duration::from_secs(1));
+        }
+        match client.post("http://127.0.0.1:9001/config").json(&body).send() {
+            Ok(resp) => {
+                resp.error_for_status()
+                    .map_err(|e| format!("Sidecar returned error: {e}"))?;
+                if let Some(win) = app.get_webview_window("setup") {
+                    let _ = win.close();
+                }
+                return Ok(());
+            }
+            Err(e) => last_err = e.to_string(),
+        }
     }
 
-    Ok(())
+    Err(format!(
+        "Could not reach the agent sidecar on port 9001 after 3 attempts.\n\
+         Make sure the sidecar is running (in dev mode: cd scraper-node && npm run dev).\n\n\
+         Detail: {last_err}"
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -172,12 +188,19 @@ pub fn run() {
                 .spawn()
                 .expect("failed to spawn scraper-node sidecar");
 
-            // Build tray icon.
+            // Build tray icon — created entirely in Rust so there is only one icon.
+            // (No trayIcon section in tauri.conf.json.)
             let menu = build_tray_menu(app.handle())?;
             let app_handle_tray = app.handle().clone();
-            TrayIconBuilder::with_id("main")
+
+            let mut tray = TrayIconBuilder::with_id("main")
                 .menu(&menu)
-                .on_menu_event(move |app, event| handle_menu_event(app, event))
+                .menu_on_left_click(false)
+                .tooltip("Auto-Scraper Agent");
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.on_menu_event(move |app, event| handle_menu_event(app, event))
                 .on_tray_icon_event(move |_tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,

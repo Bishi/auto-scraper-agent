@@ -8,14 +8,7 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [],
-    "trayIcon": {
-      "id": "main",
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
-      "menuOnLeftClick": false,
-      "tooltip": "Auto-Scraper Agent"
-    }
+    "windows": []
   },
   "bundle": {
     "active": true,
