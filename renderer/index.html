@@ -187,6 +187,21 @@
       button.run:hover    { background: #14532d; }
       button.run:disabled { opacity: 0.5; cursor: not-allowed; }
 
+      button.pause {
+        padding: 4px 12px;
+        min-width: 80px;
+        border: 1px solid #334155;
+        border-radius: 4px;
+        background: #0f172a;
+        color: #94a3b8;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+      }
+      button.pause:hover { background: #1e293b; color: #e2e8f0; }
+      button.pause.paused { border-color: #166534; background: #052e16; color: #86efac; }
+
       .log-box {
         flex: 1;
         background: #020617;
@@ -256,6 +271,7 @@
         <div class="logs-toolbar">
           <span id="log-count">0 entries</span>
           <div style="display:flex;gap:6px">
+            <button class="pause" id="pause-btn">⏸ Pause</button>
             <button class="run" id="run-scrape-btn">▶ Run Scrape</button>
             <button class="ghost" id="clear-btn">Clear</button>
           </div>
@@ -473,7 +489,10 @@
           const res = await fetchTimeout(`${SIDECAR}/schedule`);
           if (!res.ok) { scheduleText.textContent = ""; return; }
           const data = await res.json();
-          if (data.nextRunAt) {
+          updatePauseBtn(!!data.paused);
+          if (data.paused) {
+            scheduleText.textContent = "· paused";
+          } else if (data.nextRunAt) {
             const diffMin = Math.max(0, Math.round((data.nextRunAt - Date.now()) / 60000));
             const nextTime = new Date(data.nextRunAt).toLocaleTimeString(undefined, {
               hour: "2-digit", minute: "2-digit", hour12: false,
@@ -489,6 +508,32 @@
 
       pollSchedule();
       setInterval(pollSchedule, 10000);
+
+      // ── Pause / Resume scheduler ────────────────────────────────────────────
+      const pauseBtn = document.getElementById("pause-btn");
+      let schedulerPaused = false;
+
+      function updatePauseBtn(paused) {
+        schedulerPaused = paused;
+        if (paused) {
+          pauseBtn.textContent = "▶ Resume";
+          pauseBtn.classList.add("paused");
+        } else {
+          pauseBtn.textContent = "⏸ Pause";
+          pauseBtn.classList.remove("paused");
+        }
+      }
+
+      pauseBtn.addEventListener("click", async () => {
+        pauseBtn.disabled = true;
+        try {
+          const endpoint = schedulerPaused ? "/scheduler/resume" : "/scheduler/pause";
+          await fetch(`${SIDECAR}${endpoint}`, { method: "POST" });
+          await pollSchedule();
+        } catch { /* ignore */ } finally {
+          pauseBtn.disabled = false;
+        }
+      });
 
       // ── Run Scrape (Settings tab) ───────────────────────────────────────────
       const runScrapeSettingsBtn = document.getElementById("run-scrape-settings-btn");
