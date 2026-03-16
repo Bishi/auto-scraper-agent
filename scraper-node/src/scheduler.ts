@@ -89,7 +89,16 @@ export class Scheduler {
     for (const [moduleName, moduleConfig] of enabled) {
       console.log(`[agent] Scraping ${moduleName}...`);
       try {
-        const result = await runModule(moduleName, moduleConfig, browserOptions);
+        let result = await runModule(moduleName, moduleConfig, browserOptions);
+
+        // If CF issued a Managed Challenge, the profile has been cleared.
+        // Retry once immediately with the fresh profile instead of waiting
+        // until the next scheduled cycle.
+        if (result.hadManagedChallenge) {
+          console.log(`[agent] Retrying ${moduleName} with fresh browser profile…`);
+          result = await runModule(moduleName, moduleConfig, browserOptions);
+        }
+
         const response = await client.pushResults({
           moduleName,
           jobId: jobMap.get(moduleName),

@@ -54,6 +54,7 @@ export interface ScrapeResult {
   logs: LogEntry[];
   filteredListings: Listing[];
   failedUrls: string[];
+  hadManagedChallenge: boolean;
 }
 
 export async function runModule(
@@ -89,30 +90,32 @@ export async function runModule(
 
   await browser.launch();
 
-  let logs: LogEntry[] = [];
+  let hadManagedChallenge = false;
   try {
     const page = await browser.newPage();
     const listings = await module.run(page, () => browser.newPage());
-    logs = flush();
+    const logs = flush();
+
+    hadManagedChallenge = logs.some(
+      (e) => typeof e.msg === "string" && e.msg.includes("Managed Challenge"),
+    );
 
     return {
       listings,
       logs,
       filteredListings: module.lastFilteredListings,
       failedUrls: module.lastFailedUrls,
+      hadManagedChallenge,
     };
   } finally {
     await browser.close();
     // Auto-clear the browser profile if a Managed Challenge was detected.
     // The profile was flagged by CF during this run — wiping it gives the
     // next run a clean slate so CF re-evaluates without prior bad signals.
-    const hadManagedChallenge = logs.some(
-      (e) => typeof e.msg === "string" && e.msg.includes("Managed Challenge"),
-    );
     if (hadManagedChallenge) {
       try {
         rmSync(BROWSER_PROFILE_DIR, { recursive: true, force: true });
-        console.log("[agent] Browser profile auto-cleared after Managed Challenge — next run starts fresh");
+        console.log("[agent] Browser profile auto-cleared after Managed Challenge — retrying immediately");
       } catch (_) { /* non-fatal */ }
     }
   }
