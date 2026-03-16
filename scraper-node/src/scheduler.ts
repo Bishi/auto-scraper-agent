@@ -79,6 +79,9 @@ export class Scheduler {
       return;
     }
 
+    const startedAt = new Date().toLocaleTimeString();
+    console.log(`[agent] ──────────── Scrape started @ ${startedAt} ────────────`);
+
     const browserOptions = config.browser
       ? { headless: config.browser.headless ?? true, timeout: config.browser.timeout }
       : undefined;
@@ -104,5 +107,8 @@ export class Scheduler {
         client.heartbeat(AGENT_VERSION, process.platform, String(err)).catch(() => {});
       }
     }
+
+    const finishedAt = new Date().toLocaleTimeString();
+    console.log(`[agent] ──────────── Scrape complete @ ${finishedAt} ────────────`);
   }
 }
