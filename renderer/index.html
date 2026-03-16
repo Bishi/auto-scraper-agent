@@ -26,7 +26,16 @@
         flex-shrink: 0;
       }
 
-      .header h1 { font-size: 17px; font-weight: 600; flex: 1; }
+      .header h1 { font-size: 17px; font-weight: 600; }
+
+      .version-badge {
+        font-size: 11px;
+        color: #475569;
+        background: #1e293b;
+        padding: 2px 7px;
+        border-radius: 10px;
+        flex-shrink: 0;
+      }
 
       .status-dot {
         width: 8px;
@@ -187,6 +196,7 @@
   <body>
     <div class="header">
       <h1>Auto-Scraper Agent</h1>
+      <span class="version-badge" id="version-badge"></span>
       <div class="status-dot" id="dot"></div>
       <span class="status-text" id="status-text">checking…</span>
     </div>
@@ -238,6 +248,11 @@
     <script>
       const SIDECAR = "http://127.0.0.1:9001";
       const { invoke } = window.__TAURI__.core;
+
+      // ── Version badge ──────────────────────────────────────────────────────
+      window.__TAURI__.app.getVersion().then((v) => {
+        document.getElementById("version-badge").textContent = "v" + v;
+      }).catch(() => {});
 
       // ── Tabs ───────────────────────────────────────────────────────────────
       document.querySelectorAll(".tab").forEach((tab) => {
