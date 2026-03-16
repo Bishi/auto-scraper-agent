@@ -311,7 +311,7 @@
           const res = await fetchTimeout(`${SIDECAR}/health`);
           if (res.ok) {
             dot.className       = "status-dot online";
-            statusText.textContent = "running";
+            statusText.textContent = "Online";
           } else {
             dot.className       = "status-dot offline";
             statusText.textContent = "error " + res.status;
