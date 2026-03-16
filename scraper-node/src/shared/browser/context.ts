@@ -1,12 +1,8 @@
-import { chromium } from "playwright-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import { chromium } from "playwright";
 import type { BrowserContext, Page } from "playwright";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { AppConfig } from "../config.js";
-
-// Stealth plugin bypasses Cloudflare's managed challenge bot detection
-chromium.use(StealthPlugin());
 
 // Persist browser profile so Cloudflare cookies accumulate trust over runs
 const USER_DATA_DIR = join(homedir(), ".auto-scraper", "browser-profile");
@@ -23,8 +19,7 @@ export class BrowserManager {
   constructor(private config: BrowserConfig) {}
 
   async launch(): Promise<void> {
-    // playwright-extra's launchPersistentContext is compatible with playwright's BrowserContext
-    this.context = (await chromium.launchPersistentContext(USER_DATA_DIR, {
+    this.context = await chromium.launchPersistentContext(USER_DATA_DIR, {
       headless: this.config.headless,
       slowMo: this.config.slowMo,
       executablePath: this.config.executablePath,
@@ -33,7 +28,17 @@ export class BrowserManager {
       locale: "sl-SI",
       timezoneId: "Europe/Ljubljana",
       viewport: { width: 1280, height: 800 },
-    })) as unknown as BrowserContext;
+      // Suppress the main Chromium automation flag that bot-detection checks
+      args: ["--disable-blink-features=AutomationControlled"],
+    });
+
+    // Hide the remaining webdriver / automation signals at the page level
+    await this.context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
+      // Headless Chromium omits window.chrome; ensure it looks like a real browser
+      const win = window as unknown as Record<string, unknown>;
+      if (!win["chrome"]) win["chrome"] = { runtime: {} };
+    });
 
     this.context.setDefaultTimeout(this.config.timeout);
   }

@@ -48,6 +48,65 @@ mkdirSync(distDir, { recursive: true });
 // ---------------------------------------------------------------------------
 console.log("Step 1: Bundling with esbuild...");
 
+// ---------------------------------------------------------------------------
+// esbuild plugins — stub optional playwright-core deps unavailable in SEA
+// ---------------------------------------------------------------------------
+
+/**
+ * playwright-core ≥ 1.46 eagerly imports chromium-bidi (BiDi protocol) at the
+ * top of server/playwright.js. We never use BiDi — only CDP via a persistent
+ * context — so replace with no-op stubs bundled into the SEA.
+ */
+const chromiumBidiStub = {
+  name: "chromium-bidi-stub",
+  setup(build) {
+    build.onResolve({ filter: /^chromium-bidi\// }, (args) => ({
+      path: args.path,
+      namespace: "chromium-bidi-stub",
+    }));
+    build.onLoad({ filter: /.*/, namespace: "chromium-bidi-stub" }, () => ({
+      contents: "module.exports = {};",
+      loader: "js",
+    }));
+  },
+};
+
+/**
+ * puppeteer-extra (and its stealth plugin's dependency chain) uses a lazy
+ * Object.defineProperty getter that calls require('kind-of') at runtime.
+ * esbuild cannot statically inline it, so the bare require survives into the
+ * bundle. In Node.js SEA mode require() is redirected to embedderRequire,
+ * which only handles built-in modules → ERR_UNKNOWN_BUILTIN_MODULE crash.
+ * Stub it out the same way as chromium-bidi.
+ */
+const kindOfStub = {
+  name: "kind-of-stub",
+  setup(build) {
+    build.onResolve({ filter: /^kind-of$/ }, (args) => ({
+      path: args.path,
+      namespace: "kind-of-stub",
+    }));
+    build.onLoad({ filter: /.*/, namespace: "kind-of-stub" }, () => ({
+      // Minimal implementation: return the native typeof so callers get
+      // a valid string rather than crashing entirely.
+      contents: "module.exports = function kindOf(v) { return typeof v; };",
+      loader: "js",
+    }));
+  },
+};
+
+/**
+ * playwright-core uses require.resolve() to locate its own package directory.
+ * In Node.js ≥ 24 SEA mode require.resolve is not a function. Polyfill it so
+ * the registry init doesn't crash before we even call launchPersistentContext.
+ * We override executablePath at runtime so the wrong coreDir doesn't matter.
+ */
+const requireResolvePolyfill = `\
+if (typeof require !== "undefined" && typeof require.resolve !== "function") {
+  require.resolve = function seaRequireResolveStub(id) { return id; };
+}
+`;
+
 await build({
   entryPoints: [join(__dirname, "src/index.ts")],
   bundle: true,
@@ -55,10 +114,11 @@ await build({
   target: "node20",
   format: "cjs",
   outfile: outCjs,
+  plugins: [chromiumBidiStub, kindOfStub],
+  banner: { js: requireResolvePolyfill },
   // Playwright launches a browser subprocess and connects via WebSocket.
   // Its JS code bundles fine as long as executablePath is set at runtime
   // (so it never tries to locate its own browser binaries on disk).
-  // No explicit externals needed for our usage pattern.
   define: {
     "process.env.NODE_ENV": '"production"',
   },
