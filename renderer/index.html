@@ -173,6 +173,7 @@
 
       button.run {
         padding: 4px 12px;
+        min-width: 96px;
         border: 1px solid #166534;
         border-radius: 4px;
         background: #052e16;
@@ -303,10 +304,10 @@
       if (initialTab) switchTab(initialTab);
 
       // ── Fetch helper with timeout ──────────────────────────────────────────
-      function fetchTimeout(url, ms = 2000) {
+      function fetchTimeout(url, ms = 2000, opts = {}) {
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), ms);
-        return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(id));
+        return fetch(url, { signal: controller.signal, ...opts }).finally(() => clearTimeout(id));
       }
 
       // ── Status dot ─────────────────────────────────────────────────────────
@@ -400,7 +401,7 @@
         clearProfileBtn.disabled = true;
         clearProfileBtn.textContent = "Clearing…";
         try {
-          const res = await fetchTimeout(`${SIDECAR}/clear-profile`, 5000);
+          const res = await fetchTimeout(`${SIDECAR}/clear-profile`, 5000, { method: "POST" });
           const data = await res.json().catch(() => ({}));
           if (res.ok) {
             clearMsg.className = "alert success";
