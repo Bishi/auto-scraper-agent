@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.2.2";
+const AGENT_VERSION = "0.2.3";
 
 // ---------------------------------------------------------------------------
 // In-memory log ring buffer — captured from all console.log/error calls
@@ -46,9 +46,15 @@ console.error = (...args: unknown[]) => { pushLog("error", ...args); _origErr(`[
 let client: AgentApiClient | null = null;
 const scheduler = new Scheduler();
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   const body = JSON.stringify(data);
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS });
   res.end(body);
 }
 
@@ -74,6 +80,13 @@ const server = http.createServer((req, res) => {
 
   void (async () => {
     try {
+      // Handle CORS preflight — WebView2 sends OPTIONS before cross-origin POSTs.
+      if (method === "OPTIONS") {
+        res.writeHead(204, CORS_HEADERS);
+        res.end();
+        return;
+      }
+
       if (method === "GET" && pathname === "/health") {
         const config = readConfig();
         return sendJson(res, 200, { hasApiKey: !!config?.apiKey, version: AGENT_VERSION });
