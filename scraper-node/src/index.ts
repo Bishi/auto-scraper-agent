@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.2.1";
+const AGENT_VERSION = "0.2.2";
 
 // ---------------------------------------------------------------------------
 // In-memory log ring buffer — captured from all console.log/error calls
@@ -157,6 +157,15 @@ const server = http.createServer((req, res) => {
       sendJson(res, 500, { error: String(err) });
     }
   })();
+});
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`[agent] Port ${PORT} is already in use — another instance may be running. Exiting.`);
+  } else {
+    console.error(`[agent] Server error:`, err);
+  }
+  process.exit(1);
 });
 
 server.listen(PORT, "127.0.0.1", () => {
