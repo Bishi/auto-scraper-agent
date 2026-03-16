@@ -188,16 +188,16 @@
       button.run:disabled { opacity: 0.5; cursor: not-allowed; }
 
       button.pause {
-        padding: 4px 12px;
-        min-width: 80px;
+        padding: 3px 10px;
         border: 1px solid #334155;
         border-radius: 4px;
         background: #0f172a;
         color: #94a3b8;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 500;
         cursor: pointer;
         transition: background 0.15s, color 0.15s;
+        flex-shrink: 0;
       }
       button.pause:hover { background: #1e293b; color: #e2e8f0; }
       button.pause.paused { border-color: #166534; background: #052e16; color: #86efac; }
@@ -231,6 +231,7 @@
       <div class="status-dot" id="dot"></div>
       <span class="status-text" id="status-text">checking…</span>
       <span class="schedule-text" id="schedule-text"></span>
+      <button class="pause" id="pause-btn" style="margin-left:auto">⏸ Pause schedule</button>
     </div>
 
     <div class="tabs">
@@ -271,7 +272,6 @@
         <div class="logs-toolbar">
           <span id="log-count">0 entries</span>
           <div style="display:flex;gap:6px">
-            <button class="pause" id="pause-btn">⏸ Pause</button>
             <button class="run" id="run-scrape-btn">▶ Run Scrape</button>
             <button class="ghost" id="clear-btn">Clear</button>
           </div>
@@ -492,6 +492,8 @@
           updatePauseBtn(!!data.paused);
           if (data.paused) {
             scheduleText.textContent = "· paused";
+          } else if (data.running) {
+            scheduleText.textContent = "· Scrape running…";
           } else if (data.nextRunAt) {
             const diffMin = Math.max(0, Math.round((data.nextRunAt - Date.now()) / 60000));
             const nextTime = new Date(data.nextRunAt).toLocaleTimeString(undefined, {
@@ -499,7 +501,7 @@
             });
             scheduleText.textContent = `· next: ${nextTime} (${diffMin} min)`;
           } else {
-            scheduleText.textContent = "· running…";
+            scheduleText.textContent = "";
           }
         } catch {
           scheduleText.textContent = "";
@@ -516,10 +518,10 @@
       function updatePauseBtn(paused) {
         schedulerPaused = paused;
         if (paused) {
-          pauseBtn.textContent = "▶ Resume";
+          pauseBtn.textContent = "▶ Resume schedule";
           pauseBtn.classList.add("paused");
         } else {
-          pauseBtn.textContent = "⏸ Pause";
+          pauseBtn.textContent = "⏸ Pause schedule";
           pauseBtn.classList.remove("paused");
         }
       }

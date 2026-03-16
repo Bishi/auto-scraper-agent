@@ -8,7 +8,9 @@ const HEARTBEAT_INTERVAL_MS = 60_000;
 export class Scheduler {
   private scrapeTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private running = false;
+  private _running = false;
+  /** True while a scrape cycle is actively executing. */
+  get isRunning(): boolean { return this._running; }
   /** Epoch ms of the next scheduled scrape, or null if not yet scheduled / currently running. */
   nextRunAt: number | null = null;
 
@@ -26,7 +28,7 @@ export class Scheduler {
   }
 
   async triggerNow(client: AgentApiClient): Promise<void> {
-    if (this.running) {
+    if (this._running) {
       console.log("[agent] Scrape already in progress — skipping manual trigger");
       return;
     }
@@ -44,7 +46,7 @@ export class Scheduler {
   }
 
   private async runCycle(client: AgentApiClient, scheduleNext = true): Promise<void> {
-    this.running = true;
+    this._running = true;
     this.nextRunAt = null; // clear while running
     let intervalMs = 30 * 60 * 1000; // default 30 min
 
@@ -61,7 +63,7 @@ export class Scheduler {
     } catch (err) {
       console.error("[agent] Scrape cycle failed:", err);
     } finally {
-      this.running = false;
+      this._running = false;
     }
 
     if (scheduleNext) {
