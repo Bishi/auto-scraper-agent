@@ -66,10 +66,16 @@ If it crashes, fix the issue in `build.mjs` or the source before tagging.
 
 ## 6. Tag a release
 
-Bump `version` in `src-tauri/tauri.conf.json`, commit, then tag:
+Bump the version in **both** places, then commit and tag:
+
+| File | Field |
+|------|-------|
+| `src-tauri/tauri.conf.json` | `"version"` — controls installer filename, Tauri `app.getVersion()`, badge in window |
+| `scraper-node/src/index.ts` | `AGENT_VERSION` — sent in heartbeat calls to the server |
 
 ```bash
-git add src-tauri/tauri.conf.json
+# Edit both files, then:
+git add src-tauri/tauri.conf.json scraper-node/src/index.ts
 git commit -m "chore: bump version to 0.1.x"
 git tag v0.1.x
 git push && git push --tags
