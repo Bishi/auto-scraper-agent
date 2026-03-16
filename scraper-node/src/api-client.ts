@@ -12,6 +12,7 @@ export interface PushResultsParams {
   logs: LogEntry[];
   filteredListings?: Listing[];
   failedUrls?: string[];
+  retried?: boolean;
 }
 
 export interface PushResultsResponse {

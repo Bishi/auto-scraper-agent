@@ -90,6 +90,7 @@ export class Scheduler {
       console.log(`[agent] Scraping ${moduleName}...`);
       try {
         let result = await runModule(moduleName, moduleConfig, browserOptions);
+        let wasRetried = false;
 
         // If CF issued a Managed Challenge, the profile has been cleared.
         // Retry once immediately with the fresh profile instead of waiting
@@ -97,6 +98,7 @@ export class Scheduler {
         if (result.hadManagedChallenge) {
           console.log(`[agent] Retrying ${moduleName} with fresh browser profile…`);
           result = await runModule(moduleName, moduleConfig, browserOptions);
+          wasRetried = true;
         }
 
         const response = await client.pushResults({
@@ -106,6 +108,7 @@ export class Scheduler {
           logs: result.logs,
           filteredListings: result.filteredListings,
           failedUrls: result.failedUrls,
+          retried: wasRetried,
         });
         const s = response.summary;
         console.log(
