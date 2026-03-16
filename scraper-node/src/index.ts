@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.2.7";
+const AGENT_VERSION = "0.2.8";
 
 // ---------------------------------------------------------------------------
 // In-memory log ring buffer — captured from all console.log/error calls
@@ -104,6 +104,10 @@ const server = http.createServer((req, res) => {
 
       if (method === "GET" && pathname === "/logs") {
         return sendJson(res, 200, { logs: LOG_BUFFER });
+      }
+
+      if (method === "GET" && pathname === "/schedule") {
+        return sendJson(res, 200, { nextRunAt: scheduler.nextRunAt });
       }
 
       if (method === "POST" && pathname === "/config") {

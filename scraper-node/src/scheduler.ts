@@ -9,6 +9,8 @@ export class Scheduler {
   private scrapeTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  /** Epoch ms of the next scheduled scrape, or null if not yet scheduled / currently running. */
+  nextRunAt: number | null = null;
 
   start(client: AgentApiClient): void {
     this.startHeartbeat(client);
@@ -20,6 +22,7 @@ export class Scheduler {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.scrapeTimer = null;
     this.heartbeatTimer = null;
+    this.nextRunAt = null;
   }
 
   async triggerNow(client: AgentApiClient): Promise<void> {
@@ -42,6 +45,7 @@ export class Scheduler {
 
   private async runCycle(client: AgentApiClient, scheduleNext = true): Promise<void> {
     this.running = true;
+    this.nextRunAt = null; // clear while running
     let intervalMs = 30 * 60 * 1000; // default 30 min
 
     try {
@@ -61,6 +65,7 @@ export class Scheduler {
     }
 
     if (scheduleNext) {
+      this.nextRunAt = Date.now() + intervalMs;
       console.log(`[agent] Next scrape in ${Math.round(intervalMs / 60000)} min`);
       this.scrapeTimer = setTimeout(() => void this.runCycle(client), intervalMs);
     }

@@ -88,6 +88,12 @@ struct HealthResponse {
     has_api_key: bool,
 }
 
+#[derive(Deserialize)]
+struct ScheduleResponse {
+    #[serde(rename = "nextRunAt")]
+    next_run_at: Option<u64>, // epoch ms, null while running or not configured
+}
+
 fn sidecar_has_api_key() -> bool {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(2))
@@ -294,6 +300,43 @@ pub fn run() {
                     open_setup_window(&handle, tab);
                 } else {
                     eprintln!("[agent] Sidecar did not start within 10 seconds");
+                }
+            });
+
+            // Background thread: poll /schedule every 30 s and update the tray tooltip
+            // so the user can see the next scrape time by hovering the tray icon.
+            let tooltip_handle = app.handle().clone();
+            thread::spawn(move || {
+                let client = match reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(2))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(_) => return,
+                };
+                loop {
+                    thread::sleep(Duration::from_secs(30));
+                    let tooltip = client
+                        .get("http://127.0.0.1:9001/schedule")
+                        .send()
+                        .ok()
+                        .and_then(|r| r.json::<ScheduleResponse>().ok())
+                        .map(|s| {
+                            if let Some(next_ms) = s.next_run_at {
+                                let now_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0);
+                                let diff_min = next_ms.saturating_sub(now_ms) / 60_000;
+                                format!("Auto-Scraper — next scrape in {} min", diff_min)
+                            } else {
+                                "Auto-Scraper — scraping now…".to_string()
+                            }
+                        })
+                        .unwrap_or_else(|| "Auto-Scraper Agent".to_string());
+                    if let Some(tray) = tooltip_handle.tray_by_id("main") {
+                        let _ = tray.set_tooltip(Some(tooltip.as_str()));
+                    }
                 }
             });
 
