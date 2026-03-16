@@ -6,6 +6,36 @@ import { Scheduler } from "./scheduler.js";
 const PORT = 9001;
 const AGENT_VERSION = "0.1.0";
 
+// ---------------------------------------------------------------------------
+// In-memory log ring buffer — captured from all console.log/error calls
+// so the renderer can display them in the Logs tab.
+// ---------------------------------------------------------------------------
+
+interface LogEntry {
+  ts: string;
+  level: "info" | "error";
+  msg: string;
+}
+
+const LOG_BUFFER: LogEntry[] = [];
+const MAX_LOG_LINES = 300;
+
+function pushLog(level: "info" | "error", ...args: unknown[]): void {
+  const msg = args.map((a) => (typeof a === "string" ? a : String(a))).join(" ");
+  LOG_BUFFER.push({ ts: new Date().toISOString(), level, msg });
+  if (LOG_BUFFER.length > MAX_LOG_LINES) LOG_BUFFER.shift();
+}
+
+// Intercept all console output so every module's logs are captured.
+const _origLog = console.log.bind(console);
+const _origErr = console.error.bind(console);
+console.log = (...args: unknown[]) => { pushLog("info", ...args); _origLog(...args); };
+console.error = (...args: unknown[]) => { pushLog("error", ...args); _origErr(...args); };
+
+// ---------------------------------------------------------------------------
+// HTTP helpers
+// ---------------------------------------------------------------------------
+
 let client: AgentApiClient | null = null;
 const scheduler = new Scheduler();
 
@@ -18,19 +48,18 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown): void
 function readBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let raw = "";
-    req.on("data", (chunk: Buffer) => {
-      raw += chunk.toString();
-    });
+    req.on("data", (chunk: Buffer) => { raw += chunk.toString(); });
     req.on("end", () => {
-      try {
-        resolve(JSON.parse(raw));
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
+      try { resolve(JSON.parse(raw)); }
+      catch { reject(new Error("Invalid JSON body")); }
     });
     req.on("error", reject);
   });
 }
+
+// ---------------------------------------------------------------------------
+// HTTP server
+// ---------------------------------------------------------------------------
 
 const server = http.createServer((req, res) => {
   const method = req.method ?? "GET";
@@ -45,18 +74,40 @@ const server = http.createServer((req, res) => {
 
       if (method === "GET" && pathname === "/config") {
         const config = readConfig();
-        // Never expose the API key over the local HTTP interface
-        return sendJson(res, 200, config ? { serverUrl: config.serverUrl } : {});
+        // Never expose the API key — return serverUrl + a flag so the UI
+        // can show "key saved" without revealing the actual value.
+        return sendJson(res, 200, {
+          serverUrl: config?.serverUrl ?? null,
+          hasApiKey: !!config?.apiKey,
+        });
+      }
+
+      if (method === "GET" && pathname === "/logs") {
+        return sendJson(res, 200, { logs: LOG_BUFFER });
       }
 
       if (method === "POST" && pathname === "/config") {
         const body = await readBody(req) as Record<string, unknown>;
         const { apiKey, serverUrl } = body;
-        if (typeof apiKey !== "string" || typeof serverUrl !== "string") {
-          return sendJson(res, 400, { error: "apiKey and serverUrl are required strings" });
+
+        if (typeof serverUrl !== "string") {
+          return sendJson(res, 400, { error: "serverUrl is required" });
         }
-        writeConfig({ apiKey, serverUrl });
-        client = new AgentApiClient(serverUrl, apiKey);
+
+        // apiKey is optional when a key is already saved — reuse the existing one.
+        let resolvedKey: string;
+        if (typeof apiKey === "string" && apiKey.length > 0) {
+          resolvedKey = apiKey;
+        } else {
+          const existing = readConfig();
+          if (!existing?.apiKey) {
+            return sendJson(res, 400, { error: "apiKey is required (no saved key found)" });
+          }
+          resolvedKey = existing.apiKey;
+        }
+
+        writeConfig({ apiKey: resolvedKey, serverUrl });
+        client = new AgentApiClient(serverUrl, resolvedKey);
         scheduler.stop();
         scheduler.start(client);
         console.log(`[agent] Configured: serverUrl=${serverUrl}`);

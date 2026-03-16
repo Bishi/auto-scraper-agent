@@ -16,14 +16,22 @@ use serde::Deserialize;
 // Commands
 // ---------------------------------------------------------------------------
 
-/// Called from the setup window renderer when the user submits the API key form.
+/// Called from the setup window renderer when the user submits the config form.
+/// apiKey is empty-string when the user wants to keep the previously saved key.
 #[tauri::command]
 fn save_config(
-    app: AppHandle,
+    _app: AppHandle,
     api_key: String,
     server_url: String,
 ) -> Result<(), String> {
-    let body = serde_json::json!({ "apiKey": api_key, "serverUrl": server_url });
+    // Build body — omit apiKey entirely when empty so the sidecar reuses its
+    // saved key (avoids forcing the user to re-enter it every time).
+    let body = if api_key.is_empty() {
+        serde_json::json!({ "serverUrl": server_url })
+    } else {
+        serde_json::json!({ "apiKey": api_key, "serverUrl": server_url })
+    };
+
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
@@ -39,9 +47,8 @@ fn save_config(
             Ok(resp) => {
                 resp.error_for_status()
                     .map_err(|e| format!("Sidecar returned error: {e}"))?;
-                if let Some(win) = app.get_webview_window("setup") {
-                    let _ = win.close();
-                }
+                // Window stays open — the renderer shows a success banner and
+                // the user can switch to the Logs tab or close manually.
                 return Ok(());
             }
             Err(e) => last_err = e.to_string(),
@@ -120,9 +127,9 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>) {
         "setup",
         tauri::WebviewUrl::App("index.html".into()),
     )
-    .title("Auto-Scraper Setup")
-    .inner_size(480.0, 320.0)
-    .resizable(false)
+    .title("Auto-Scraper Agent")
+    .inner_size(540.0, 500.0)
+    .resizable(true)
     .center()
     .build();
 }
