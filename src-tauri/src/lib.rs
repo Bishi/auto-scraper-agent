@@ -289,10 +289,14 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app, event| {
             // Keep the process alive when all windows are closed so the tray
-            // icon persists. The only legitimate exit path is the "Quit" tray
-            // menu item, which calls app.exit(0) explicitly.
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                api.prevent_exit();
+            // icon persists.
+            // IMPORTANT: only prevent exit when triggered by a window close
+            // (code is None). When the "Quit" menu item calls app.exit(0),
+            // code is Some(0) — do NOT prevent it or Quit silently does nothing.
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
             }
         });
 }

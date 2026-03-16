@@ -4,7 +4,7 @@ import { AgentApiClient } from "./api-client.js";
 import { Scheduler } from "./scheduler.js";
 
 const PORT = 9001;
-const AGENT_VERSION = "0.1.6";
+const AGENT_VERSION = "0.1.7";
 
 // ---------------------------------------------------------------------------
 // In-memory log ring buffer — captured from all console.log/error calls
