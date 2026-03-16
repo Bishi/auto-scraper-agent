@@ -1,11 +1,16 @@
 import pino from "pino";
 import type { Logger } from "pino";
 import { Writable } from "node:stream";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { BrowserManager } from "./shared/browser/context.js";
 import { getModule } from "./shared/modules/registry.js";
 import { normalizeUrlEntry } from "./shared/config.js";
 import type { UrlEntry } from "./shared/config.js";
 import type { Listing, LogEntry, DbModuleConfig } from "./shared/types.js";
+
+const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 interface LogBuffer {
   logger: Logger;
@@ -84,10 +89,11 @@ export async function runModule(
 
   await browser.launch();
 
+  let logs: LogEntry[] = [];
   try {
     const page = await browser.newPage();
     const listings = await module.run(page, () => browser.newPage());
-    const logs = flush();
+    logs = flush();
 
     return {
       listings,
@@ -97,5 +103,17 @@ export async function runModule(
     };
   } finally {
     await browser.close();
+    // Auto-clear the browser profile if a Managed Challenge was detected.
+    // The profile was flagged by CF during this run — wiping it gives the
+    // next run a clean slate so CF re-evaluates without prior bad signals.
+    const hadManagedChallenge = logs.some(
+      (e) => typeof e.msg === "string" && e.msg.includes("Managed Challenge"),
+    );
+    if (hadManagedChallenge) {
+      try {
+        rmSync(BROWSER_PROFILE_DIR, { recursive: true, force: true });
+        console.log("[agent] Browser profile auto-cleared after Managed Challenge — next run starts fresh");
+      } catch (_) { /* non-fatal */ }
+    }
   }
 }

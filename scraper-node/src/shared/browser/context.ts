@@ -108,11 +108,53 @@ export class BrowserManager {
 
     this.context.setDefaultTimeout(this.config.timeout);
 
-    // Belt-and-suspenders: inject navigator.webdriver removal directly on the
-    // context so it applies to every page regardless of whether the stealth
-    // plugin's onPageCreated hook fires correctly for launchPersistentContext.
+    // Inject fingerprint fixes directly on the context so they apply to every
+    // page regardless of whether the stealth plugin's onPageCreated hook fires
+    // correctly for launchPersistentContext.
+    //
+    // NOTE: the user-agent-override stealth evasion is disabled (its dep chain
+    // can't resolve in Node.js SEA), so we replicate its two key fixes here:
+    //   1. navigator.webdriver → undefined  (stealth navigator.webdriver also does this)
+    //   2. navigator.userAgentData          (only user-agent-override did this — gap!)
+    //
+    // Without #2, CF sees navigator.userAgent claiming "Chrome 131" while
+    // navigator.userAgentData.brands reveals the actual Chromium build —
+    // a strong bot-detection signal.
     await this.context.addInitScript(() => {
+      // 1. Hide webdriver flag
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+
+      // 2. Align userAgentData with our spoofed userAgent (Chrome 131, Windows)
+      try {
+        const brands = [
+          { brand: "Google Chrome", version: "131" },
+          { brand: "Chromium",      version: "131" },
+          { brand: "Not_A Brand",   version: "24"  },
+        ];
+        const fullList = [
+          { brand: "Google Chrome", version: "131.0.0.0" },
+          { brand: "Chromium",      version: "131.0.0.0" },
+          { brand: "Not_A Brand",   version: "24.0.0.0"  },
+        ];
+        const hintValues = {
+          architecture: "x86", bitness: "64", brands,
+          fullVersionList: fullList, mobile: false, model: "",
+          platform: "Windows", platformVersion: "15.0.0",
+          uaFullVersion: "131.0.0.0",
+        };
+        const uaData = {
+          brands,
+          mobile: false,
+          platform: "Windows",
+          getHighEntropyValues(hints) {
+            const out = {};
+            for (const h of hints) { if (h in hintValues) out[h] = hintValues[h]; }
+            return Promise.resolve(out);
+          },
+          toJSON() { return { brands, mobile: false, platform: "Windows" }; },
+        };
+        Object.defineProperty(navigator, "userAgentData", { get: () => uaData });
+      } catch (_) { /* browser may not support userAgentData */ }
     });
   }
 
