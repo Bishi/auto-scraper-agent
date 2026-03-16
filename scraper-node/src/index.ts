@@ -1,10 +1,16 @@
 import http from "node:http";
+import { rmSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { readConfig, writeConfig } from "./store.js";
 import { AgentApiClient } from "./api-client.js";
 import { Scheduler } from "./scheduler.js";
 
+// Must match USER_DATA_DIR in shared/browser/context.ts
+const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
+
 const PORT = 9001;
-const AGENT_VERSION = "0.1.8";
+const AGENT_VERSION = "0.1.9";
 
 // ---------------------------------------------------------------------------
 // In-memory log ring buffer — captured from all console.log/error calls
@@ -29,8 +35,9 @@ function pushLog(level: "info" | "error", ...args: unknown[]): void {
 // Intercept all console output so every module's logs are captured.
 const _origLog = console.log.bind(console);
 const _origErr = console.error.bind(console);
-console.log = (...args: unknown[]) => { pushLog("info", ...args); _origLog(...args); };
-console.error = (...args: unknown[]) => { pushLog("error", ...args); _origErr(...args); };
+const hhmm = () => new Date().toTimeString().slice(0, 8);
+console.log = (...args: unknown[]) => { pushLog("info", ...args); _origLog(`[${hhmm()}]`, ...args); };
+console.error = (...args: unknown[]) => { pushLog("error", ...args); _origErr(`[${hhmm()}]`, ...args); };
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
@@ -127,6 +134,21 @@ const server = http.createServer((req, res) => {
         sendJson(res, 200, { ok: true });
         setTimeout(() => process.exit(0), 500);
         return;
+      }
+
+      if (method === "POST" && pathname === "/clear-profile") {
+        try {
+          if (existsSync(BROWSER_PROFILE_DIR)) {
+            rmSync(BROWSER_PROFILE_DIR, { recursive: true, force: true });
+            console.log("[agent] Browser profile cleared — will start fresh on next scrape");
+          } else {
+            console.log("[agent] Browser profile directory not found — nothing to clear");
+          }
+          return sendJson(res, 200, { ok: true });
+        } catch (err) {
+          console.error("[agent] Failed to clear browser profile:", err);
+          return sendJson(res, 500, { error: String(err) });
+        }
       }
 
       sendJson(res, 404, { error: `${method} ${pathname} not found` });

@@ -230,6 +230,18 @@
         <button class="primary" id="save-btn">Save</button>
         <div class="alert error"   id="error-msg"></div>
         <div class="alert success" id="success-msg">Saved! Agent will scrape on schedule.</div>
+
+        <hr style="border:none;border-top:1px solid #1e293b;margin:20px 0" />
+
+        <p style="font-size:13px;font-weight:500;color:#cbd5e1;margin-bottom:8px">Troubleshooting</p>
+        <p class="hint" style="margin-bottom:12px">
+          If avto.net shows a Cloudflare Managed Challenge, clearing the browser
+          profile resets its trust score and may help bypass the block.
+        </p>
+        <button class="ghost" id="clear-profile-btn" style="width:100%;padding:8px">
+          Clear Browser Profile
+        </button>
+        <div class="alert" id="clear-msg" style="margin-top:8px"></div>
       </div>
 
       <!-- Logs panel -->
@@ -255,14 +267,23 @@
       }).catch(() => {});
 
       // ── Tabs ───────────────────────────────────────────────────────────────
+      function switchTab(name) {
+        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+        const tabEl = document.querySelector(`.tab[data-tab="${name}"]`);
+        if (tabEl) {
+          tabEl.classList.add("active");
+          document.getElementById("panel-" + name).classList.add("active");
+        }
+      }
+
       document.querySelectorAll(".tab").forEach((tab) => {
-        tab.addEventListener("click", () => {
-          document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-          document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
-          tab.classList.add("active");
-          document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
-        });
+        tab.addEventListener("click", () => switchTab(tab.dataset.tab));
       });
+
+      // Honour ?tab= query param (e.g. when opened from tray "Run Now" → tab=logs)
+      const initialTab = new URLSearchParams(window.location.search).get("tab");
+      if (initialTab) switchTab(initialTab);
 
       // ── Fetch helper with timeout ──────────────────────────────────────────
       function fetchTimeout(url, ms = 2000) {
@@ -350,6 +371,34 @@
         } finally {
           saveBtn.disabled    = false;
           saveBtn.textContent = "Save";
+        }
+      });
+
+      // ── Clear browser profile ──────────────────────────────────────────────
+      const clearProfileBtn = document.getElementById("clear-profile-btn");
+      const clearMsg        = document.getElementById("clear-msg");
+
+      clearProfileBtn.addEventListener("click", async () => {
+        clearMsg.style.display = "none";
+        clearProfileBtn.disabled = true;
+        clearProfileBtn.textContent = "Clearing…";
+        try {
+          const res = await fetchTimeout(`${SIDECAR}/clear-profile`, 5000);
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            clearMsg.className = "alert success";
+            clearMsg.textContent = "Browser profile cleared. Restart a scrape to rebuild trust.";
+          } else {
+            clearMsg.className = "alert error";
+            clearMsg.textContent = data.error ?? "Failed to clear profile";
+          }
+        } catch {
+          clearMsg.className = "alert error";
+          clearMsg.textContent = "Could not reach the sidecar — is it running?";
+        } finally {
+          clearMsg.style.display = "block";
+          clearProfileBtn.disabled = false;
+          clearProfileBtn.textContent = "Clear Browser Profile";
         }
       });
 

@@ -118,14 +118,21 @@ fn sidecar_server_url() -> String {
         .unwrap_or_else(|| "http://localhost:3000".to_string())
 }
 
-fn open_setup_window<R: Runtime>(app: &AppHandle<R>) {
-    if app.get_webview_window("setup").is_some() {
+fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
+    if let Some(win) = app.get_webview_window("setup") {
+        // Window already exists — just bring it to front.
+        let _ = win.show();
+        let _ = win.set_focus();
         return;
     }
+    let url_path = match tab {
+        Some(t) => format!("index.html?tab={}", t),
+        None    => "index.html".to_string(),
+    };
     let _ = tauri::WebviewWindowBuilder::new(
         app,
         "setup",
-        tauri::WebviewUrl::App("index.html".into()),
+        tauri::WebviewUrl::App(url_path.into()),
     )
     .title("Auto-Scraper Agent")
     .inner_size(540.0, 500.0)
@@ -149,16 +156,21 @@ fn build_tray_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
     match event.id().as_ref() {
         "run_now" => {
-            let _ = reqwest::blocking::Client::new()
-                .post("http://127.0.0.1:9001/scrape/now")
-                .send();
+            // Fire the scrape in the background — don't block the menu event handler.
+            let _ = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .map(|c| c.post("http://127.0.0.1:9001/scrape/now").send());
+            // Open (or focus) the agent window on the Logs tab so the user can
+            // see live progress without having to open it manually.
+            open_setup_window(app, Some("logs"));
         }
         "open" => {
             let url = sidecar_server_url();
             let _ = app.opener().open_url(&url, None::<String>);
         }
         "setup" => {
-            open_setup_window(app);
+            open_setup_window(app, None);
         }
         "quit" => {
             let _ = reqwest::blocking::Client::new()
@@ -264,9 +276,10 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        if !sidecar_has_api_key() {
-                            open_setup_window(&app_handle_tray);
-                        }
+                        // Left-click always opens/focuses the window. When no API
+                        // key is saved yet, open on Settings; otherwise open on Logs.
+                        let tab = if sidecar_has_api_key() { Some("logs") } else { None };
+                        open_setup_window(&app_handle_tray, tab);
                     }
                 })
                 .build(app)?;
@@ -276,7 +289,7 @@ pub fn run() {
             thread::spawn(move || {
                 if wait_for_sidecar() {
                     if !sidecar_has_api_key() {
-                        open_setup_window(&handle);
+                        open_setup_window(&handle, None);
                     }
                 } else {
                     eprintln!("[agent] Sidecar did not start within 10 seconds");

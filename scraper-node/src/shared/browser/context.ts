@@ -107,6 +107,13 @@ export class BrowserManager {
     });
 
     this.context.setDefaultTimeout(this.config.timeout);
+
+    // Belt-and-suspenders: inject navigator.webdriver removal directly on the
+    // context so it applies to every page regardless of whether the stealth
+    // plugin's onPageCreated hook fires correctly for launchPersistentContext.
+    await this.context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
   }
 
   async newPage(): Promise<Page> {

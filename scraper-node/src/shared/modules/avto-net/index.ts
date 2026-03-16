@@ -40,9 +40,34 @@ export class AvtoNetModule extends ScraperModule {
           .catch(() => false);
 
         if (isChallenge) {
-          this.logger.info({ url }, "Cloudflare challenge detected — waiting up to 90s for resolution");
-          // This throws if unresolved, which propagates to base.ts as a failed URL
-          await page.waitForSelector(SELECTORS.listingRow, { timeout: 90000 });
+          // Distinguish between two CF challenge types:
+          //  - Managed Challenge (Turnstile): has a Turnstile widget/iframe — NEVER auto-resolves
+          //    in headless mode. Fail immediately instead of wasting time.
+          //  - JS Challenge: auto-executing scripts that resolve in seconds if at all.
+          //    Give it up to 30s (the old 90s was always overkill — JS challenges
+          //    either resolve quickly or not at all).
+          const isManagedChallenge = await page.evaluate(() =>
+            !!document.querySelector('[id^="cf-chl-widget-"]') ||
+            !!document.querySelector('.cf-turnstile') ||
+            Array.from(document.querySelectorAll('iframe')).some(
+              (f) => (f as HTMLIFrameElement).src.includes('challenges.cloudflare.com'),
+            )
+          ).catch(() => false);
+
+          if (isManagedChallenge) {
+            this.logger.error(
+              { url },
+              "Cloudflare Managed Challenge (Turnstile) — cannot auto-solve in headless mode. " +
+              "Fix: set browser.headless=false in Settings, or clear the browser profile " +
+              "(POST http://127.0.0.1:9001/clear-profile) to reset CF trust.",
+            );
+            // Throw so base.ts adds this URL to lastFailedUrls (avoids false "removed" detections)
+            throw new Error("Cloudflare Managed Challenge blocked scrape");
+          }
+
+          this.logger.info({ url }, "Cloudflare JS challenge — waiting up to 30s for auto-resolution");
+          // Throws on timeout → propagates to base.ts as a failed URL (same as before)
+          await page.waitForSelector(SELECTORS.listingRow, { timeout: 30000 });
           return true;
         }
 
