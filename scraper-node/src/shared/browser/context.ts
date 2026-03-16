@@ -1,8 +1,83 @@
-import { chromium } from "playwright";
+// Use playwright-extra's `addExtra` named export instead of the default
+// `chromium` re-export.  The default export tries to locate playwright via a
+// dynamic require('playwright-core') / require('playwright') at runtime — in
+// a Node.js SEA those calls go through embedderRequire which only handles
+// built-ins → crash.  `addExtra` lets us hand playwright's chromium in
+// directly, so playwright-extra never needs to auto-detect it.
+import { addExtra } from "playwright-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+// Import every evasion sub-plugin statically so esbuild bundles them.
+// The stealth plugin otherwise loads them via dynamic require() at launch time,
+// which fails in a Node.js SEA (embedderRequire only handles built-ins).
+// We pre-register each one via setDependencyResolution so playwright-extra's
+// bundler-unfriendly dependency loader is bypassed entirely.
+import EvasionChromeApp             from "puppeteer-extra-plugin-stealth/evasions/chrome.app/index.js";
+import EvasionChromeCsi             from "puppeteer-extra-plugin-stealth/evasions/chrome.csi/index.js";
+import EvasionChromeLoadTimes       from "puppeteer-extra-plugin-stealth/evasions/chrome.loadTimes/index.js";
+import EvasionChromeRuntime         from "puppeteer-extra-plugin-stealth/evasions/chrome.runtime/index.js";
+import EvasionDefaultArgs           from "puppeteer-extra-plugin-stealth/evasions/defaultArgs/index.js";
+import EvasionIframeContentWindow   from "puppeteer-extra-plugin-stealth/evasions/iframe.contentWindow/index.js";
+import EvasionMediaCodecs           from "puppeteer-extra-plugin-stealth/evasions/media.codecs/index.js";
+import EvasionNavigatorHardware     from "puppeteer-extra-plugin-stealth/evasions/navigator.hardwareConcurrency/index.js";
+import EvasionNavigatorLanguages    from "puppeteer-extra-plugin-stealth/evasions/navigator.languages/index.js";
+import EvasionNavigatorPermissions  from "puppeteer-extra-plugin-stealth/evasions/navigator.permissions/index.js";
+import EvasionNavigatorPlugins      from "puppeteer-extra-plugin-stealth/evasions/navigator.plugins/index.js";
+import EvasionNavigatorVendor       from "puppeteer-extra-plugin-stealth/evasions/navigator.vendor/index.js";
+import EvasionNavigatorWebdriver    from "puppeteer-extra-plugin-stealth/evasions/navigator.webdriver/index.js";
+import EvasionSourceurl             from "puppeteer-extra-plugin-stealth/evasions/sourceurl/index.js";
+// user-agent-override is intentionally excluded: its dependency chain
+// (user-preferences → user-data-dir) cannot be resolved in a Node.js SEA,
+// and it is redundant because we already set userAgent in launchPersistentContext.
+import EvasionWebglVendor           from "puppeteer-extra-plugin-stealth/evasions/webgl.vendor/index.js";
+import EvasionWindowOuterdimensions from "puppeteer-extra-plugin-stealth/evasions/window.outerdimensions/index.js";
+import playwright from "playwright";
 import type { BrowserContext, Page } from "playwright";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { AppConfig } from "../config.js";
+
+// ---------------------------------------------------------------------------
+// Build the stealth-patched chromium once at module load.
+// ---------------------------------------------------------------------------
+
+const chromium = addExtra(playwright.chromium);
+
+// Disable user-agent-override: its dep chain (user-preferences → user-data-dir)
+// cannot be resolved in a Node.js SEA, and the evasion is redundant since we
+// set userAgent directly in launchPersistentContext options.
+const stealth = StealthPlugin();
+stealth.enabledEvasions.delete("user-agent-override");
+chromium.use(stealth);
+
+// Pre-register every evasion dependency so playwright-extra never falls back
+// to dynamic require() (which crashes in Node.js SEA mode).
+const EVASION_DEPS: Array<[string, unknown]> = [
+  ["stealth/evasions/chrome.app",                    EvasionChromeApp],
+  ["stealth/evasions/chrome.csi",                    EvasionChromeCsi],
+  ["stealth/evasions/chrome.loadTimes",              EvasionChromeLoadTimes],
+  ["stealth/evasions/chrome.runtime",                EvasionChromeRuntime],
+  ["stealth/evasions/defaultArgs",                   EvasionDefaultArgs],
+  ["stealth/evasions/iframe.contentWindow",          EvasionIframeContentWindow],
+  ["stealth/evasions/media.codecs",                  EvasionMediaCodecs],
+  ["stealth/evasions/navigator.hardwareConcurrency", EvasionNavigatorHardware],
+  ["stealth/evasions/navigator.languages",           EvasionNavigatorLanguages],
+  ["stealth/evasions/navigator.permissions",         EvasionNavigatorPermissions],
+  ["stealth/evasions/navigator.plugins",             EvasionNavigatorPlugins],
+  ["stealth/evasions/navigator.vendor",              EvasionNavigatorVendor],
+  ["stealth/evasions/navigator.webdriver",           EvasionNavigatorWebdriver],
+  ["stealth/evasions/sourceurl",                     EvasionSourceurl],
+  ["stealth/evasions/webgl.vendor",                  EvasionWebglVendor],
+  ["stealth/evasions/window.outerdimensions",        EvasionWindowOuterdimensions],
+];
+
+for (const [path, mod] of EVASION_DEPS) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (chromium.plugins as any).setDependencyResolution(path, mod);
+}
+
+// ---------------------------------------------------------------------------
+// BrowserManager
+// ---------------------------------------------------------------------------
 
 // Persist browser profile so Cloudflare cookies accumulate trust over runs
 const USER_DATA_DIR = join(homedir(), ".auto-scraper", "browser-profile");
@@ -28,16 +103,7 @@ export class BrowserManager {
       locale: "sl-SI",
       timezoneId: "Europe/Ljubljana",
       viewport: { width: 1280, height: 800 },
-      // Suppress the main Chromium automation flag that bot-detection checks
       args: ["--disable-blink-features=AutomationControlled"],
-    });
-
-    // Hide the remaining webdriver / automation signals at the page level
-    await this.context.addInitScript(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => false });
-      // Headless Chromium omits window.chrome; ensure it looks like a real browser
-      const win = window as unknown as Record<string, unknown>;
-      if (!win["chrome"]) win["chrome"] = { runtime: {} };
     });
 
     this.context.setDefaultTimeout(this.config.timeout);

@@ -1,0 +1,20 @@
+// Type declarations for puppeteer-extra-plugin-stealth's evasion sub-paths.
+// These are plain JS modules with no bundled .d.ts files.
+declare module "puppeteer-extra-plugin-stealth/evasions/chrome.app/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/chrome.csi/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/chrome.loadTimes/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/chrome.runtime/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/defaultArgs/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/iframe.contentWindow/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/media.codecs/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/navigator.hardwareConcurrency/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/navigator.languages/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/navigator.permissions/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/navigator.plugins/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/navigator.vendor/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/navigator.webdriver/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/sourceurl/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/user-agent-override/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/webgl.vendor/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-stealth/evasions/window.outerdimensions/index.js" { const p: unknown; export default p; }
+declare module "puppeteer-extra-plugin-user-preferences" { const p: unknown; export default p; }

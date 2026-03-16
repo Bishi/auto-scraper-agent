@@ -96,6 +96,66 @@ const kindOfStub = {
 };
 
 /**
+ * clone-deep and shallow-clone (dependencies of puppeteer-extra) use the
+ * legacy `lazy-cache` pattern: they temporarily replace the local `require`
+ * with a lazy-cache wrapper and register their own deps (kind-of, etc.) into
+ * it.  The wrapper captures the *outer* require reference — which in Node SEA
+ * mode is `embedderRequire` — and calls it lazily when a property is accessed.
+ * esbuild's onResolve stub for `kind-of` is therefore bypassed, and the lazy
+ * getter crashes with ERR_UNKNOWN_BUILTIN_MODULE at runtime.
+ *
+ * Fix: replace both packages with self-contained stubs so `lazy-cache` is
+ * never involved at all.  These stubs cover every call-site in puppeteer-extra
+ * (deep-cloning plain plugin config objects + primitive values).
+ */
+const cloneDeepStub = {
+  name: "clone-deep-stub",
+  setup(build) {
+    build.onResolve({ filter: /^clone-deep$/ }, (args) => ({
+      path: args.path,
+      namespace: "clone-deep-stub",
+    }));
+    build.onLoad({ filter: /.*/, namespace: "clone-deep-stub" }, () => ({
+      contents: `
+module.exports = function cloneDeep(val) {
+  if (val === null || typeof val !== "object") return val;
+  if (Array.isArray(val)) return val.map(module.exports);
+  // Set and Map must be cloned as Set/Map — iterating them as plain objects
+  // produces empty results and breaks plugins that store options in a Set
+  // (e.g. puppeteer-extra-plugin-stealth's enabledEvasions Set).
+  if (val instanceof Set) return new Set(Array.from(val).map(module.exports));
+  if (val instanceof Map) return new Map(Array.from(val).map(([k, v]) => [module.exports(k), module.exports(v)]));
+  const out = {};
+  for (const k of Object.keys(val)) {
+    out[k] = typeof val[k] === "function" ? val[k] : module.exports(val[k]);
+  }
+  return out;
+};`,
+      loader: "js",
+    }));
+  },
+};
+
+const shallowCloneStub = {
+  name: "shallow-clone-stub",
+  setup(build) {
+    build.onResolve({ filter: /^shallow-clone$/ }, (args) => ({
+      path: args.path,
+      namespace: "shallow-clone-stub",
+    }));
+    build.onLoad({ filter: /.*/, namespace: "shallow-clone-stub" }, () => ({
+      contents: `
+module.exports = function shallowClone(val) {
+  if (val === null || typeof val !== "object") return val;
+  if (Array.isArray(val)) return val.slice();
+  return Object.assign({}, val);
+};`,
+      loader: "js",
+    }));
+  },
+};
+
+/**
  * playwright-core uses require.resolve() to locate its own package directory.
  * In Node.js ≥ 24 SEA mode require.resolve is not a function. Polyfill it so
  * the registry init doesn't crash before we even call launchPersistentContext.
@@ -114,7 +174,7 @@ await build({
   target: "node20",
   format: "cjs",
   outfile: outCjs,
-  plugins: [chromiumBidiStub, kindOfStub],
+  plugins: [chromiumBidiStub, kindOfStub, cloneDeepStub, shallowCloneStub],
   banner: { js: requireResolvePolyfill },
   // Playwright launches a browser subprocess and connects via WebSocket.
   // Its JS code bundles fine as long as executablePath is set at runtime
