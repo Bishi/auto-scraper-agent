@@ -9,6 +9,7 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_shell::process::CommandEvent;
 use serde::Deserialize;
 
 // ---------------------------------------------------------------------------
@@ -184,9 +185,57 @@ pub fn run() {
                 .sidecar("scraper-node")
                 .expect("scraper-node sidecar not configured");
 
-            let (_rx, _child) = sidecar_cmd
+            let (rx, child) = sidecar_cmd
                 .spawn()
                 .expect("failed to spawn scraper-node sidecar");
+
+            // Prevent any kill-on-drop behaviour. The sidecar must live for
+            // the entire app lifetime; the "Quit" menu item shuts it down via
+            // POST /stop before calling app.exit(0).
+            std::mem::forget(child);
+
+            // Watchdog: drain the event channel (keeps the OS pipe flowing so
+            // sidecar stdout never blocks) and restart the sidecar automatically
+            // if it crashes. On each restart the sidecar re-reads its saved
+            // config from disk, so the scheduler resumes without user action.
+            let watchdog_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut rx = rx;
+                loop {
+                    // Drain events until the sidecar exits.
+                    while let Some(event) = rx.recv().await {
+                        if let CommandEvent::Terminated(payload) = event {
+                            eprintln!(
+                                "[agent] Sidecar exited (code {:?}), restarting in 3 s…",
+                                payload.code
+                            );
+                            break;
+                        }
+                    }
+                    // Brief pause to avoid a tight crash loop.
+                    tauri::async_runtime::spawn_blocking(|| {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                    })
+                    .await
+                    .ok();
+                    // Re-spawn the sidecar.
+                    match watchdog_handle
+                        .shell()
+                        .sidecar("scraper-node")
+                        .and_then(|c| c.spawn())
+                    {
+                        Ok((new_rx, new_child)) => {
+                            std::mem::forget(new_child);
+                            rx = new_rx;
+                            eprintln!("[agent] Sidecar restarted.");
+                        }
+                        Err(e) => {
+                            eprintln!("[agent] Could not restart sidecar: {e}");
+                            break;
+                        }
+                    }
+                }
+            });
 
             // Build tray icon — created entirely in Rust so there is only one icon.
             // (No trayIcon section in tauri.conf.json.)

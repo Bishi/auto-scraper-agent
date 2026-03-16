@@ -10,16 +10,32 @@ export class AvtoNetModule extends ScraperModule {
   }
 
   async scrape(page: Page, url: string): Promise<Listing[]> {
+    // Cloudflare challenge titles, keyed to the locale set in context.ts (sl-SI).
+    // The Slovenian title "Počakajte trenutek..." is the localised equivalent of
+    // the English "Just a moment..." — both indicate a CF managed challenge page.
+    const CF_CHALLENGE_TITLES = ["just a moment", "počakajte trenutek", "un moment"];
+
+    const isChallengeTitle = (title: string) =>
+      CF_CHALLENGE_TITLES.some((t) => title.toLowerCase().includes(t));
+
     const ready = await page
       .waitForSelector(SELECTORS.listingRow, { timeout: 15000 })
       .then(() => true)
       .catch(async () => {
-        // Check if we're stuck on a Cloudflare managed challenge page
+        // Check if we're stuck on a Cloudflare managed challenge page.
+        // Cloudflare localises the page title — check both the DOM and a set of
+        // known titles (English + Slovenian, matching our locale: "sl-SI").
         const isChallenge = await page
           .evaluate(
-            () =>
-              document.title.toLowerCase().includes("just a moment") ||
-              !!document.querySelector("#cf-wrapper, #challenge-form, .cf-browser-verification"),
+            ({ titles, domCheck }: { titles: string[]; domCheck: string }) => {
+              const titleMatch = titles.some((t) => document.title.toLowerCase().includes(t));
+              const domMatch = !!document.querySelector(domCheck);
+              return titleMatch || domMatch;
+            },
+            {
+              titles: CF_CHALLENGE_TITLES,
+              domCheck: "#challenge-stage, #cf-wrapper, #challenge-form, .cf-browser-verification",
+            },
           )
           .catch(() => false);
 
@@ -48,6 +64,18 @@ export class AvtoNetModule extends ScraperModule {
           hasActualRows: !!document.querySelector(".GO-Results-Row"),
         }))
         .catch(() => ({ pageTitle: "unknown", pageUrl: url, onResultsPage: false, hasActualRows: false }));
+
+      // A Cloudflare managed challenge keeps the browser on the original
+      // results.asp URL, so onResultsPage stays true even though we're blocked.
+      // Detect this before the onResultsPage/hasActualRows three-way check so
+      // it routes as ERROR (bot block) instead of WARN (empty search).
+      if (isChallengeTitle(pageTitle)) {
+        this.logger.error(
+          { url, pageTitle, pageUrl },
+          "Cloudflare challenge page — bot detection blocked the scrape (locale-localised title detected)",
+        );
+        return [];
+      }
 
       if (!onResultsPage) {
         // Wrong page entirely — redirect, 404, bot block, or completely broken URL
