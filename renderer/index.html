@@ -171,6 +171,20 @@
       }
       button.ghost:hover { background: #1e293b; color: #e2e8f0; }
 
+      button.run {
+        padding: 4px 12px;
+        border: 1px solid #166534;
+        border-radius: 4px;
+        background: #052e16;
+        color: #86efac;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      button.run:hover    { background: #14532d; }
+      button.run:disabled { opacity: 0.5; cursor: not-allowed; }
+
       .log-box {
         flex: 1;
         background: #020617;
@@ -248,7 +262,10 @@
       <div class="panel" id="panel-logs">
         <div class="logs-toolbar">
           <span id="log-count">0 entries</span>
-          <button class="ghost" id="clear-btn">Clear</button>
+          <div style="display:flex;gap:6px">
+            <button class="run" id="run-scrape-btn">▶ Run Scrape</button>
+            <button class="ghost" id="clear-btn">Clear</button>
+          </div>
         </div>
         <div class="log-box" id="log-box">
           <div class="log-empty">No logs yet.</div>
@@ -400,6 +417,21 @@
           clearProfileBtn.disabled = false;
           clearProfileBtn.textContent = "Clear Browser Profile";
         }
+      });
+
+      // ── Run Scrape ─────────────────────────────────────────────────────────
+      const runScrapeBtn = document.getElementById("run-scrape-btn");
+
+      runScrapeBtn.addEventListener("click", async () => {
+        runScrapeBtn.disabled     = true;
+        runScrapeBtn.textContent  = "Starting…";
+        try {
+          await fetch(`${SIDECAR}/scrape/now`, { method: "POST" });
+        } catch { /* fire-and-forget — sidecar logs the result */ }
+        setTimeout(() => {
+          runScrapeBtn.disabled    = false;
+          runScrapeBtn.textContent = "▶ Run Scrape";
+        }, 2000);
       });
 
       // ── Logs ───────────────────────────────────────────────────────────────

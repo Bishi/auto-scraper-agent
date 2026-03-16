@@ -284,13 +284,14 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Wait for sidecar in background, then show setup if needed.
+            // Wait for sidecar in background, then open the window.
+            // Not configured yet → Settings tab so the user can enter credentials.
+            // Already configured  → Logs tab so they can see activity straight away.
             let handle = app.handle().clone();
             thread::spawn(move || {
                 if wait_for_sidecar() {
-                    if !sidecar_has_api_key() {
-                        open_setup_window(&handle, None);
-                    }
+                    let tab = if sidecar_has_api_key() { Some("logs") } else { None };
+                    open_setup_window(&handle, tab);
                 } else {
                     eprintln!("[agent] Sidecar did not start within 10 seconds");
                 }
