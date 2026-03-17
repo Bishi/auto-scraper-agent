@@ -13,6 +13,10 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # Evaluated once at job start so it can be used in step `if:` conditions.
+      # secrets context is not permitted inside step-level if expressions.
+      HAS_SIGNING_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
 
     steps:
       # -----------------------------------------------------------------------
@@ -113,7 +117,7 @@ jobs:
       #        WINDOWS_CERTIFICATE_PASSWORD — .pfx password
       # -----------------------------------------------------------------------
       - name: Sign installer
-        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        if: env.HAS_SIGNING_CERT == 'true'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
