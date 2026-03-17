@@ -9,6 +9,8 @@ export interface Listing {
   price: number | null;
   metadata: Record<string, string | number | boolean | null>;
   contentHash: string;
+  /** Content fingerprint for repost detection. Module-specific, nullable. */
+  fingerprint?: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
 }
@@ -25,6 +27,7 @@ export interface DiffSummary {
   changed: number;
   removed: number;
   reappeared: number;
+  repost?: number;
   total: number;
 }
 
