@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build:sea": "node build.mjs",
     "setup:chromium": "node setup-chromium.mjs"
   },
@@ -22,6 +25,7 @@
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }
