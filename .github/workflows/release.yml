@@ -49,6 +49,20 @@ jobs:
         run: npm ci
 
       # -----------------------------------------------------------------------
+      # Security checks
+      # -----------------------------------------------------------------------
+      - name: Dependency audit (root)
+        run: npm audit --audit-level=high
+
+      - name: Dependency audit (scraper-node)
+        working-directory: scraper-node
+        run: npm audit --audit-level=high
+
+      - name: Run parser tests
+        working-directory: scraper-node
+        run: npm test
+
+      # -----------------------------------------------------------------------
       # Build Node SEA sidecar  →  src-tauri/binaries/scraper-node-*.exe
       # -----------------------------------------------------------------------
       - name: Build Node SEA sidecar
@@ -87,6 +101,47 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Build Tauri app (NSIS installer)
         run: npm run build:tauri
+
+      # -----------------------------------------------------------------------
+      # Windows code signing (skipped if certificate secret is not configured)
+      #
+      # To enable signing:
+      #   1. Obtain a Windows code signing certificate (.pfx file)
+      #   2. Base64-encode it:  certutil -encode cert.pfx cert.b64
+      #   3. Add GitHub secrets:
+      #        WINDOWS_CERTIFICATE          — base64-encoded .pfx content
+      #        WINDOWS_CERTIFICATE_PASSWORD — .pfx password
+      # -----------------------------------------------------------------------
+      - name: Sign installer
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $bytes = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $pfxPath = Join-Path $env:TEMP "signing.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
+
+          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
+            -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "x64" } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $signtool) { throw "signtool.exe not found" }
+
+          Get-ChildItem -Path "src-tauri\target\release\bundle\nsis\*.exe" | ForEach-Object {
+            Write-Host "Signing $($_.FullName)"
+            & $signtool sign `
+              /f $pfxPath `
+              /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+              /tr http://timestamp.digicert.com `
+              /td sha256 /fd sha256 `
+              $_.FullName
+          }
+
+          Remove-Item $pfxPath -Force
 
       # -----------------------------------------------------------------------
       # Always upload installer as a workflow artifact (useful for debugging)
