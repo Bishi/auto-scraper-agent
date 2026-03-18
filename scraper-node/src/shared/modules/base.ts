@@ -132,6 +132,22 @@ export abstract class ScraperModule {
         } catch (error) {
           this.logger.error({ ...logId, err: error }, "Failed to scrape URL");
           this.lastFailedUrls.push(urlEntry.url);
+          // Capture a fallback snapshot when the module-level code didn't already
+          // record one (e.g. unexpected Playwright timeout / navigation error).
+          // Only add if there's no snapshot for this URL yet — module-specific
+          // paths (CF challenge, redirect, selector_broken) add their own first.
+          const alreadyCaptured = this.lastDebugSnapshots.some((s) => s.sourceUrl === urlEntry.url);
+          if (!alreadyCaptured) {
+            const html = await p.content().catch(() => "");
+            this.addDebugSnapshot({
+              moduleName: this.name,
+              sourceUrl: urlEntry.url,
+              errorType: "redirect",
+              errorMsg: `Unexpected error: ${String(error).slice(0, 500)}`,
+              html: html.length > 2_000_000 ? html.slice(0, 2_000_000) : html,
+              capturedAt: new Date().toISOString(),
+            });
+          }
         } finally {
           await p.close();
         }
@@ -201,6 +217,22 @@ export abstract class ScraperModule {
         } catch (error) {
           this.logger.error({ ...logId, err: error }, "Failed to scrape URL");
           this.lastFailedUrls.push(urlEntry.url);
+          // Capture a fallback snapshot when the module-level code didn't already
+          // record one (e.g. unexpected Playwright timeout / navigation error).
+          // Only add if there's no snapshot for this URL yet — module-specific
+          // paths (CF challenge, redirect, selector_broken) add their own first.
+          const alreadyCaptured = this.lastDebugSnapshots.some((s) => s.sourceUrl === urlEntry.url);
+          if (!alreadyCaptured) {
+            const html = await page.content().catch(() => "");
+            this.addDebugSnapshot({
+              moduleName: this.name,
+              sourceUrl: urlEntry.url,
+              errorType: "redirect",
+              errorMsg: `Unexpected error: ${String(error).slice(0, 500)}`,
+              html: html.length > 2_000_000 ? html.slice(0, 2_000_000) : html,
+              capturedAt: new Date().toISOString(),
+            });
+          }
         }
       }
     }

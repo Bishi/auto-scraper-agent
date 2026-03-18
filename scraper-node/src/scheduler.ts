@@ -104,8 +104,12 @@ export class Scheduler {
         // until the next scheduled cycle.
         if (result.hadManagedChallenge) {
           console.log(`[agent] Retrying ${moduleName} with fresh browser profile…`);
+          // Preserve snapshots from the original (failed) run so the dashboard
+          // can show what Cloudflare returned, even if the retry succeeds.
+          const originalSnapshots = result.debugSnapshots;
           result = await runModule(moduleName, moduleConfig, browserOptions);
           wasRetried = true;
+          result = { ...result, debugSnapshots: [...originalSnapshots, ...result.debugSnapshots] };
         }
 
         const response = await client.pushResults({
