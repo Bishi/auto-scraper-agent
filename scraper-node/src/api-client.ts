@@ -59,8 +59,8 @@ export class AgentApiClient {
     });
   }
 
-  async heartbeat(version: string, platform: string, failureMsg?: string): Promise<void> {
-    await this.request<{ ok: boolean }>("/api/agent/heartbeat", {
+  async heartbeat(version: string, platform: string, failureMsg?: string): Promise<{ ok: boolean; command?: string | null; paused?: boolean }> {
+    return this.request<{ ok: boolean; command?: string | null; paused?: boolean }>("/api/agent/heartbeat", {
       method: "POST",
       body: JSON.stringify({ version, platform, ...(failureMsg ? { failureMsg } : {}) }),
     });

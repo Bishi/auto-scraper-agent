@@ -9,12 +9,16 @@ export class Scheduler {
   private scrapeTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private _running = false;
+  private _paused = false;
   /** True while a scrape cycle is actively executing. */
   get isRunning(): boolean { return this._running; }
+  /** True when the scheduler is paused (heartbeat continues but scrapes are suspended). */
+  get isPaused(): boolean { return this._paused; }
   /** Epoch ms of the next scheduled scrape, or null if not yet scheduled / currently running. */
   nextRunAt: number | null = null;
 
   start(client: AgentApiClient): void {
+    this._paused = false;
     this.startHeartbeat(client);
     void this.runCycle(client);
   }
@@ -25,6 +29,21 @@ export class Scheduler {
     this.scrapeTimer = null;
     this.heartbeatTimer = null;
     this.nextRunAt = null;
+    this._paused = false;
+  }
+
+  /** Suspend scraping without stopping the heartbeat. */
+  pause(): void {
+    if (this.scrapeTimer) clearTimeout(this.scrapeTimer);
+    this.scrapeTimer = null;
+    this.nextRunAt = null;
+    this._paused = true;
+  }
+
+  /** Resume scraping — triggers an immediate cycle. */
+  async resume(client: AgentApiClient): Promise<void> {
+    this._paused = false;
+    await this.runCycle(client, false);
   }
 
   async triggerNow(client: AgentApiClient): Promise<void> {
@@ -37,9 +56,25 @@ export class Scheduler {
 
   private startHeartbeat(client: AgentApiClient): void {
     const beat = (): void => {
-      client.heartbeat(AGENT_VERSION, process.platform).catch((err: unknown) => {
-        console.error("[agent] Heartbeat failed:", err);
-      });
+      client.heartbeat(AGENT_VERSION, process.platform)
+        .then((res) => {
+          // Act on server-side command (one-shot, already cleared server-side)
+          if (res.command === "scrape_now" && !this._running) {
+            console.log("[agent] Server command: scrape_now");
+            void this.triggerNow(client);
+          }
+          // Sync pause state from server
+          if (res.paused === true && !this._paused) {
+            this.pause();
+            console.log("[agent] Scheduler paused by server");
+          } else if (res.paused === false && this._paused) {
+            console.log("[agent] Scheduler resumed by server");
+            void this.resume(client);
+          }
+        })
+        .catch((err: unknown) => {
+          console.error("[agent] Heartbeat failed:", err);
+        });
     };
     beat(); // immediate first beat
     this.heartbeatTimer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
@@ -66,7 +101,8 @@ export class Scheduler {
       this._running = false;
     }
 
-    if (scheduleNext) {
+    // Only schedule the next run if not paused
+    if (scheduleNext && !this._paused) {
       this.nextRunAt = Date.now() + intervalMs;
       console.log(`[agent] Next scrape in ${Math.round(intervalMs / 60000)} min`);
       this.scrapeTimer = setTimeout(() => void this.runCycle(client), intervalMs);

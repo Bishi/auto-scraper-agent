@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.3.5";
+const AGENT_VERSION = "0.3.6";
 
 // ---------------------------------------------------------------------------
 // In-memory log ring buffer — captured from all console.log/error calls
@@ -45,7 +45,6 @@ console.error = (...args: unknown[]) => { pushLog("error", ...args); _origErr(`[
 
 let client: AgentApiClient | null = null;
 const scheduler = new Scheduler();
-let schedulerPaused = false;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -108,12 +107,11 @@ const server = http.createServer((req, res) => {
       }
 
       if (method === "GET" && pathname === "/schedule") {
-        return sendJson(res, 200, { nextRunAt: scheduler.nextRunAt, paused: schedulerPaused, running: scheduler.isRunning });
+        return sendJson(res, 200, { nextRunAt: scheduler.nextRunAt, paused: scheduler.isPaused, running: scheduler.isRunning });
       }
 
       if (method === "POST" && pathname === "/scheduler/pause") {
-        scheduler.stop();
-        schedulerPaused = true;
+        scheduler.pause();
         console.log("[agent] Scheduler paused by user");
         return sendJson(res, 200, { ok: true });
       }
@@ -122,8 +120,7 @@ const server = http.createServer((req, res) => {
         if (!client) {
           return sendJson(res, 400, { error: "Not configured. POST /config first." });
         }
-        scheduler.start(client);
-        schedulerPaused = false;
+        void scheduler.resume(client);
         console.log("[agent] Scheduler resumed by user");
         return sendJson(res, 200, { ok: true });
       }
