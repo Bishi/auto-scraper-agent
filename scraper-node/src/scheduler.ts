@@ -2,14 +2,16 @@ import type { AgentApiClient } from "./api-client.js";
 import { runModule } from "./scraper.js";
 import type { DbConfig } from "./shared/types.js";
 
-const AGENT_VERSION = "0.1.0";
 const HEARTBEAT_INTERVAL_MS = 60_000;
+
+type Trigger = "startup" | "schedule" | "manual" | "server" | "resume";
 
 export class Scheduler {
   private scrapeTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private _running = false;
   private _paused = false;
+  private _version = "";
   /** True while a scrape cycle is actively executing. */
   get isRunning(): boolean { return this._running; }
   /** True when the scheduler is paused (heartbeat continues but scrapes are suspended). */
@@ -17,10 +19,11 @@ export class Scheduler {
   /** Epoch ms of the next scheduled scrape, or null if not yet scheduled / currently running. */
   nextRunAt: number | null = null;
 
-  start(client: AgentApiClient): void {
+  start(client: AgentApiClient, version = ""): void {
+    this._version = version;
     this._paused = false;
     this.startHeartbeat(client);
-    void this.runCycle(client);
+    void this.runCycle(client, true, "startup");
   }
 
   stop(): void {
@@ -44,25 +47,28 @@ export class Scheduler {
   async resume(client: AgentApiClient): Promise<void> {
     this._paused = false;
     if (this._running) return;
-    await this.runCycle(client, false);
+    await this.runCycle(client, true, "resume");
   }
 
-  async triggerNow(client: AgentApiClient): Promise<void> {
+  async triggerNow(client: AgentApiClient, trigger: "manual" | "server" = "manual"): Promise<void> {
     if (this._running) {
       console.log("[agent] Scrape already in progress — skipping manual trigger");
       return;
     }
-    await this.runCycle(client, false);
+    // Clear existing timer so the 30-min clock resets from now
+    if (this.scrapeTimer) clearTimeout(this.scrapeTimer);
+    this.scrapeTimer = null;
+    await this.runCycle(client, true, trigger);
   }
 
   private startHeartbeat(client: AgentApiClient): void {
     const beat = (): void => {
-      client.heartbeat(AGENT_VERSION, process.platform)
+      client.heartbeat(this._version, process.platform)
         .then((res) => {
           // Act on server-side command (one-shot, already cleared server-side)
           if (res.command === "scrape_now" && !this._running) {
             console.log("[agent] Server command: scrape_now");
-            void this.triggerNow(client);
+            void this.triggerNow(client, "server");
           }
           // Sync pause state from server
           if (res.paused === true && !this._paused) {
@@ -81,7 +87,7 @@ export class Scheduler {
     this.heartbeatTimer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
   }
 
-  private async runCycle(client: AgentApiClient, scheduleNext = true): Promise<void> {
+  private async runCycle(client: AgentApiClient, scheduleNext = true, trigger: Trigger = "startup"): Promise<void> {
     if (this._running) return;
     this._running = true;
     this.nextRunAt = null; // clear while running
@@ -96,7 +102,7 @@ export class Scheduler {
       intervalMs = schedule.intervalMs;
       const jobMap = new Map(schedule.jobs.map((j) => [j.moduleName, j.id]));
 
-      await this.scrapeAll(client, config, jobMap);
+      await this.scrapeAll(client, config, jobMap, trigger);
     } catch (err) {
       console.error("[agent] Scrape cycle failed:", err);
     } finally {
@@ -107,7 +113,7 @@ export class Scheduler {
     if (scheduleNext && !this._paused) {
       this.nextRunAt = Date.now() + intervalMs;
       console.log(`[agent] Next scrape in ${Math.round(intervalMs / 60000)} min`);
-      this.scrapeTimer = setTimeout(() => void this.runCycle(client), intervalMs);
+      this.scrapeTimer = setTimeout(() => void this.runCycle(client, true, "schedule"), intervalMs);
     }
   }
 
@@ -115,6 +121,7 @@ export class Scheduler {
     client: AgentApiClient,
     config: DbConfig,
     jobMap: Map<string, number>,
+    trigger: Trigger,
   ): Promise<void> {
     const modules = config.modules ?? {};
     const enabled = Object.entries(modules).filter(([, m]) => m.enabled);
@@ -124,8 +131,15 @@ export class Scheduler {
       return;
     }
 
+    const triggerLabel =
+      trigger === "startup" ? "startup"
+      : trigger === "schedule" ? "scheduled"
+      : trigger === "manual" ? "manual (agent UI)"
+      : trigger === "server" ? "server command"
+      : "resume";
+
     const startedAt = new Date().toLocaleTimeString();
-    console.log(`[agent] ──────────── Scrape started @ ${startedAt} ────────────`);
+    console.log(`[agent] ──────────── Scrape started @ ${startedAt} [${triggerLabel}] ────────────`);
 
     const browserOptions = config.browser
       ? { headless: config.browser.headless ?? true, timeout: config.browser.timeout }
@@ -133,6 +147,7 @@ export class Scheduler {
 
     for (const [moduleName, moduleConfig] of enabled) {
       console.log(`[agent] Scraping ${moduleName}...`);
+      const moduleStartedAt = new Date();
       try {
         let result = await runModule(moduleName, moduleConfig, browserOptions);
         let wasRetried = false;
@@ -159,6 +174,7 @@ export class Scheduler {
           failedUrls: result.failedUrls,
           retried: wasRetried,
           debugSnapshots: result.debugSnapshots,
+          startedAt: moduleStartedAt.toISOString(),
         });
         const s = response.summary;
         console.log(
@@ -166,7 +182,7 @@ export class Scheduler {
         );
       } catch (err) {
         console.error(`[agent] Failed to scrape/push ${moduleName}:`, err);
-        client.heartbeat(AGENT_VERSION, process.platform, String(err)).catch(() => {});
+        client.heartbeat(this._version, process.platform, String(err)).catch(() => {});
       }
     }
 

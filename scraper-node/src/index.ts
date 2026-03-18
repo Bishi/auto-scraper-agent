@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.3.8";
+const AGENT_VERSION = "0.3.9";
 
 // ---------------------------------------------------------------------------
 // In-memory log ring buffer — captured from all console.log/error calls
@@ -148,7 +148,7 @@ const server = http.createServer((req, res) => {
         writeConfig({ apiKey: resolvedKey, serverUrl });
         client = new AgentApiClient(serverUrl, resolvedKey);
         scheduler.stop();
-        scheduler.start(client);
+        scheduler.start(client, AGENT_VERSION);
         console.log(`[agent] Configured: serverUrl=${serverUrl}`);
         return sendJson(res, 200, { ok: true });
       }
@@ -209,7 +209,7 @@ const storedConfig = readConfig();
 if (storedConfig) {
   console.log(`[agent] Loaded saved config: serverUrl=${storedConfig.serverUrl}`);
   client = new AgentApiClient(storedConfig.serverUrl, storedConfig.apiKey);
-  scheduler.start(client);
+  scheduler.start(client, AGENT_VERSION);
 } else {
   console.log("[agent] No saved config. POST http://127.0.0.1:9001/config with { apiKey, serverUrl } to start.");
 }

@@ -14,6 +14,7 @@ export interface PushResultsParams {
   failedUrls?: string[];
   retried?: boolean;
   debugSnapshots?: DebugSnapshotData[];
+  startedAt?: string;
 }
 
 export interface PushResultsResponse {
