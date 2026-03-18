@@ -56,6 +56,8 @@ export interface DebugSnapshotData {
   /** Raw page HTML, truncated to 2 MB before upload. */
   html: string;
   capturedAt: string; // ISO 8601
+  /** True when this snapshot was captured before a CF managed-challenge retry. */
+  preRetry?: boolean;
 }
 
 export interface DbConfig {
