@@ -33,6 +33,10 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+          # Include scraper-node lock file so its dep changes also bust the cache
+          cache-dependency-path: |
+            package-lock.json
+            scraper-node/package-lock.json
 
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -40,7 +44,7 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workdir: src-tauri
+          workspaces: src-tauri
 
       # -----------------------------------------------------------------------
       # Node dependencies
@@ -54,27 +58,39 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Security checks
+      # Only audit production deps — Playwright's bundled Chromium regularly
+      # carries high-severity CVEs that are irrelevant to the shipped binary.
       # -----------------------------------------------------------------------
       - name: Dependency audit (root)
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=high --omit=dev
 
       - name: Dependency audit (scraper-node)
         working-directory: scraper-node
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=high --omit=dev
 
+      # -----------------------------------------------------------------------
+      # Type checking
+      # -----------------------------------------------------------------------
+      - name: Typecheck scraper-node
+        working-directory: scraper-node
+        run: npm run typecheck
+
+      # -----------------------------------------------------------------------
+      # Tests
+      # -----------------------------------------------------------------------
       - name: Run parser tests
         working-directory: scraper-node
         run: npm test
 
       # -----------------------------------------------------------------------
-      # Build Node SEA sidecar  →  src-tauri/binaries/scraper-node-*.exe
+      # Build Node SEA sidecar  ->  src-tauri/binaries/scraper-node-*.exe
       # -----------------------------------------------------------------------
       - name: Build Node SEA sidecar
         working-directory: scraper-node
         run: node build.mjs
 
       # -----------------------------------------------------------------------
-      # Download Playwright Chromium headless-shell  →  src-tauri/binaries/
+      # Download Playwright Chromium headless-shell  ->  src-tauri/binaries/
       # -----------------------------------------------------------------------
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -87,7 +103,12 @@ jobs:
         run: node setup-chromium.mjs
 
       # -----------------------------------------------------------------------
-      # Sync tauri.conf.json version with the git tag (tag builds only)
+      # Sync version fields from the git tag (tag builds only)
+      #
+      # Both tauri.conf.json (controls installer name / Tauri getVersion()) and
+      # AGENT_VERSION in scraper-node/src/index.ts (sent in heartbeat calls)
+      # must match the tag.  Syncing here means a forgotten manual bump can
+      # never ship a version mismatch to production.
       # -----------------------------------------------------------------------
       - name: Sync version from tag
         if: startsWith(github.ref, 'refs/tags/')
@@ -95,10 +116,18 @@ jobs:
         run: |
           $tag     = '${{ github.ref_name }}'
           $version = $tag -replace '^v', ''
-          $cfg     = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+
+          # tauri.conf.json
+          $cfg = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
           $cfg.version = $version
           $cfg | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json -Encoding UTF8
-          Write-Host "tauri.conf.json version → $version"
+          Write-Host "tauri.conf.json -> $version"
+
+          # scraper-node/src/index.ts  (const AGENT_VERSION = "x.y.z")
+          $src = Get-Content scraper-node/src/index.ts -Raw
+          $src = $src -replace '(?<=const AGENT_VERSION = ")[^"]+(?=")', $version
+          Set-Content scraper-node/src/index.ts -Value $src -Encoding UTF8 -NoNewline
+          Write-Host "AGENT_VERSION -> $version"
 
       # -----------------------------------------------------------------------
       # Tauri NSIS build
@@ -113,8 +142,8 @@ jobs:
       #   1. Obtain a Windows code signing certificate (.pfx file)
       #   2. Base64-encode it:  certutil -encode cert.pfx cert.b64
       #   3. Add GitHub secrets:
-      #        WINDOWS_CERTIFICATE          — base64-encoded .pfx content
-      #        WINDOWS_CERTIFICATE_PASSWORD — .pfx password
+      #        WINDOWS_CERTIFICATE          -- base64-encoded .pfx content
+      #        WINDOWS_CERTIFICATE_PASSWORD -- .pfx password
       # -----------------------------------------------------------------------
       - name: Sign installer
         if: env.HAS_SIGNING_CERT == 'true'
@@ -123,29 +152,33 @@ jobs:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          $bytes = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $bytes   = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
           $pfxPath = Join-Path $env:TEMP "signing.pfx"
           [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
 
-          $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
-            -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "x64" } |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1 -ExpandProperty FullName
+          # Wrap in try/finally so the .pfx is removed even if signtool fails.
+          try {
+            $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
+              -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match "x64" } |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
 
-          if (-not $signtool) { throw "signtool.exe not found" }
+            if (-not $signtool) { throw "signtool.exe not found" }
 
-          Get-ChildItem -Path "src-tauri\target\release\bundle\nsis\*.exe" | ForEach-Object {
-            Write-Host "Signing $($_.FullName)"
-            & $signtool sign `
-              /f $pfxPath `
-              /p $env:WINDOWS_CERTIFICATE_PASSWORD `
-              /tr http://timestamp.digicert.com `
-              /td sha256 /fd sha256 `
-              $_.FullName
+            Get-ChildItem -Path "src-tauri\target\release\bundle\nsis\*.exe" | ForEach-Object {
+              Write-Host "Signing $($_.FullName)"
+              & $signtool sign `
+                /f $pfxPath `
+                /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+                /tr http://timestamp.digicert.com `
+                /td sha256 /fd sha256 `
+                $_.FullName
+              if ($LASTEXITCODE -ne 0) { throw "signtool exited with $LASTEXITCODE" }
+            }
+          } finally {
+            Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
           }
-
-          Remove-Item $pfxPath -Force
 
       # -----------------------------------------------------------------------
       # Always upload installer as a workflow artifact (useful for debugging)
@@ -158,7 +191,26 @@ jobs:
           if-no-files-found: error
 
       # -----------------------------------------------------------------------
-      # Tag build → create versioned GitHub Release
+      # Tag build -> create versioned GitHub Release
+      #
+      # Download URL patterns
+      # ============================================================
+      # Specific release (stable):
+      #   https://github.com/Bishi/auto-scraper-agent/releases/download/v{version}/Auto-Scraper-Agent_{version}_x64-setup.exe
+      #   Example:
+      #   https://github.com/Bishi/auto-scraper-agent/releases/download/v0.3.5/Auto-Scraper-Agent_0.3.5_x64-setup.exe
+      #
+      # Latest stable (GitHub redirect — always points to newest tag):
+      #   https://github.com/Bishi/auto-scraper-agent/releases/latest/download/Auto-Scraper-Agent_{version}_x64-setup.exe
+      #   Note: filename still contains version so it changes per release.
+      #   Redirect target: https://github.com/Bishi/auto-scraper-agent/releases/latest
+      #
+      # Rolling pre-release (manual workflow_dispatch):
+      #   https://github.com/Bishi/auto-scraper-agent/releases/download/latest/Auto-Scraper-Agent_{version}_x64-setup.exe
+      #
+      # GitHub API (machine-readable, stable URL):
+      #   https://api.github.com/repos/Bishi/auto-scraper-agent/releases/latest
+      #   -> .assets[].browser_download_url  (contains signed .exe URL)
       # -----------------------------------------------------------------------
       - name: Create GitHub Release (versioned)
         if: startsWith(github.ref, 'refs/tags/')
@@ -168,7 +220,7 @@ jobs:
           generate_release_notes: true
 
       # -----------------------------------------------------------------------
-      # Manual run → create/update a rolling "latest" pre-release
+      # Manual run -> create/update a rolling "latest" pre-release
       # -----------------------------------------------------------------------
       - name: Update "latest" pre-release (manual build)
         if: github.event_name == 'workflow_dispatch'
@@ -179,4 +231,4 @@ jobs:
           name: "Latest Build"
           prerelease: true
           body: |
-            Rolling pre-release — built from `${{ github.ref_name }}` @ ${{ github.sha }}
+            Rolling pre-release -- built from `${{ github.ref_name }}` @ ${{ github.sha }}
