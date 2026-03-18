@@ -40,9 +40,10 @@ export class Scheduler {
     this._paused = true;
   }
 
-  /** Resume scraping — triggers an immediate cycle. */
+  /** Resume scraping — triggers an immediate cycle if one isn't already running. */
   async resume(client: AgentApiClient): Promise<void> {
     this._paused = false;
+    if (this._running) return;
     await this.runCycle(client, false);
   }
 
@@ -81,6 +82,7 @@ export class Scheduler {
   }
 
   private async runCycle(client: AgentApiClient, scheduleNext = true): Promise<void> {
+    if (this._running) return;
     this._running = true;
     this.nextRunAt = null; // clear while running
     let intervalMs = 30 * 60 * 1000; // default 30 min
