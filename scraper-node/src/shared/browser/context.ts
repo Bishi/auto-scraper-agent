@@ -146,9 +146,9 @@ export class BrowserManager {
           brands,
           mobile: false,
           platform: "Windows",
-          getHighEntropyValues(hints) {
-            const out = {};
-            for (const h of hints) { if (h in hintValues) out[h] = hintValues[h]; }
+          getHighEntropyValues(hints: string[]) {
+            const out: Record<string, unknown> = {};
+            for (const h of hints) { if (h in hintValues) out[h] = (hintValues as Record<string, unknown>)[h]; }
             return Promise.resolve(out);
           },
           toJSON() { return { brands, mobile: false, platform: "Windows" }; },
