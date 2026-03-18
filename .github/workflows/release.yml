@@ -130,22 +130,31 @@ jobs:
           Write-Host "AGENT_VERSION -> $version"
 
       # -----------------------------------------------------------------------
-      # Tauri NSIS build
-      # -----------------------------------------------------------------------
-      - name: Build Tauri app (NSIS installer)
-        run: npm run build:tauri
-
-      # -----------------------------------------------------------------------
-      # Windows code signing (skipped if certificate secret is not configured)
+      # Windows code signing — Round 1: sign the scraper-node sidecar BEFORE
+      # the Tauri build bundles it into the NSIS installer.
+      #
+      # Why two rounds?
+      #   The NSIS installer extracts its payload to disk on install.  If only
+      #   the outer installer is signed, the extracted sidecar .exe files are
+      #   unsigned and may be flagged by Windows Defender or enterprise EDR
+      #   tools when they are first launched.  Signing the sidecar here ensures
+      #   every .exe on disk after installation carries a valid signature.
+      #
+      #   The Chromium headless-shell is intentionally excluded — it is already
+      #   signed by Google and re-signing would invalidate that signature.
       #
       # To enable signing:
       #   1. Obtain a Windows code signing certificate (.pfx file)
+      #      Recommended: EV cert (DigiCert, Sectigo) — immediately trusted by
+      #      SmartScreen with no reputation-building period (~$300/yr).
+      #      OV cert also works but SmartScreen shows a warning until the binary
+      #      accumulates enough downloads to build reputation.
       #   2. Base64-encode it:  certutil -encode cert.pfx cert.b64
       #   3. Add GitHub secrets:
       #        WINDOWS_CERTIFICATE          -- base64-encoded .pfx content
       #        WINDOWS_CERTIFICATE_PASSWORD -- .pfx password
       # -----------------------------------------------------------------------
-      - name: Sign installer
+      - name: Sign scraper-node sidecar
         if: env.HAS_SIGNING_CERT == 'true'
         shell: pwsh
         env:
@@ -156,7 +165,51 @@ jobs:
           $pfxPath = Join-Path $env:TEMP "signing.pfx"
           [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
 
-          # Wrap in try/finally so the .pfx is removed even if signtool fails.
+          try {
+            $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
+              -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match "x64" } |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+
+            if (-not $signtool) { throw "signtool.exe not found" }
+
+            # Sign only scraper-node — exclude chromium-headless-shell (Google-signed)
+            Get-ChildItem -Path "src-tauri\binaries\scraper-node-*.exe" | ForEach-Object {
+              Write-Host "Signing sidecar: $($_.Name)"
+              & $signtool sign `
+                /f $pfxPath `
+                /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+                /tr http://timestamp.digicert.com `
+                /td sha256 /fd sha256 `
+                $_.FullName
+              if ($LASTEXITCODE -ne 0) { throw "signtool exited with $LASTEXITCODE for $($_.Name)" }
+            }
+          } finally {
+            Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
+          }
+
+      # -----------------------------------------------------------------------
+      # Tauri NSIS build — bundles the (now-signed) scraper-node sidecar
+      # -----------------------------------------------------------------------
+      - name: Build Tauri app (NSIS installer)
+        run: npm run build:tauri
+
+      # -----------------------------------------------------------------------
+      # Windows code signing — Round 2: sign the NSIS installer itself.
+      # This is what SmartScreen checks at download/run time.
+      # -----------------------------------------------------------------------
+      - name: Sign NSIS installer
+        if: env.HAS_SIGNING_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $bytes   = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $pfxPath = Join-Path $env:TEMP "signing.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
+
           try {
             $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
               -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue |
@@ -167,14 +220,14 @@ jobs:
             if (-not $signtool) { throw "signtool.exe not found" }
 
             Get-ChildItem -Path "src-tauri\target\release\bundle\nsis\*.exe" | ForEach-Object {
-              Write-Host "Signing $($_.FullName)"
+              Write-Host "Signing installer: $($_.Name)"
               & $signtool sign `
                 /f $pfxPath `
                 /p $env:WINDOWS_CERTIFICATE_PASSWORD `
                 /tr http://timestamp.digicert.com `
                 /td sha256 /fd sha256 `
                 $_.FullName
-              if ($LASTEXITCODE -ne 0) { throw "signtool exited with $LASTEXITCODE" }
+              if ($LASTEXITCODE -ne 0) { throw "signtool exited with $LASTEXITCODE for $($_.Name)" }
             }
           } finally {
             Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
