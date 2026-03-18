@@ -84,6 +84,44 @@ git push && git push --tags
 CI builds the NSIS installer and attaches it to a versioned GitHub Release.
 Download from the Releases page and run the installer.
 
+> **Version fields are synced automatically from the git tag by CI.**
+> You still need to bump both files manually before tagging so the version
+> shows correctly in local dev (`npm run dev`), but a mismatch will never
+> ship — the CI "Sync version from tag" step overwrites both files before the
+> build and the release upload.
+
+## Release download URLs
+
+### Specific version (stable)
+```
+https://github.com/Bishi/auto-scraper-agent/releases/download/v{version}/Auto-Scraper-Agent_{version}_x64-setup.exe
+```
+Example:
+```
+https://github.com/Bishi/auto-scraper-agent/releases/download/v0.3.5/Auto-Scraper-Agent_0.3.5_x64-setup.exe
+```
+
+### Always-latest stable (GitHub redirect)
+```
+https://github.com/Bishi/auto-scraper-agent/releases/latest/download/Auto-Scraper-Agent_{version}_x64-setup.exe
+```
+⚠️ The filename still contains the version number, so this URL changes with every release.
+Use the GitHub API for a truly static download URL:
+
+### GitHub API (machine-readable)
+```
+GET https://api.github.com/repos/Bishi/auto-scraper-agent/releases/latest
+```
+Returns JSON — `assets[0].browser_download_url` is the direct `.exe` link.
+Useful for building an auto-update check: compare `tag_name` against the
+running `AGENT_VERSION` to know if an update is available.
+
+### Rolling pre-release (manual `workflow_dispatch` build)
+```
+https://github.com/Bishi/auto-scraper-agent/releases/download/latest/Auto-Scraper-Agent_{version}_x64-setup.exe
+```
+Tagged `latest`, marked pre-release. Use for testing unreleased builds.
+
 ## What to test after installing
 
 1. App appears in system tray
