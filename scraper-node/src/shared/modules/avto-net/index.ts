@@ -55,12 +55,22 @@ export class AvtoNetModule extends ScraperModule {
           ).catch(() => false);
 
           if (isManagedChallenge) {
-            this.logger.error(
-              { url },
+            const errorMsg =
               "Cloudflare Managed Challenge (Turnstile) — cannot auto-solve in headless mode. " +
               "Fix: set browser.headless=false in Settings, or clear the browser profile " +
-              "(POST http://127.0.0.1:9001/clear-profile) to reset CF trust.",
-            );
+              "(POST http://127.0.0.1:9001/clear-profile) to reset CF trust.";
+            this.logger.error({ url }, errorMsg);
+            // Capture the challenge page HTML before throwing so the dashboard
+            // can show exactly what Cloudflare returned.
+            const html = await page.content().catch(() => "");
+            this.addDebugSnapshot({
+              moduleName: this.name,
+              sourceUrl: url,
+              errorType: "bot_block",
+              errorMsg,
+              html: html.length > 2_000_000 ? html.slice(0, 2_000_000) : html,
+              capturedAt: new Date().toISOString(),
+            });
             // Throw so base.ts adds this URL to lastFailedUrls (avoids false "removed" detections)
             throw new Error("Cloudflare Managed Challenge blocked scrape");
           }
