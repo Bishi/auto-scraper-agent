@@ -47,22 +47,25 @@ export class BolhaModule extends ScraperModule {
         }), SELECTORS.noResultsText)
         .catch(() => ({ pageTitle: "unknown", pageUrl: url, hasResultsContainer: false, isNoResults: false }));
 
+      const captureHtml = async (): Promise<string> => {
+        const raw = await page.content().catch(() => "");
+        return raw.length > 2_000_000 ? raw.slice(0, 2_000_000) : raw;
+      };
+
       if (!hasResultsContainer) {
         // Wrong page entirely — redirect, 404, bot block, or completely broken selector
-        this.logger.error(
-          { url, pageTitle, pageUrl },
-          "Results container (.EntityList--Regular) not found — selector may be broken, URL redirected, or unexpected page",
-        );
+        const errorMsg = "Results container (.EntityList--Regular) not found — selector may be broken, URL redirected, or unexpected page";
+        this.logger.error({ url, pageTitle, pageUrl }, errorMsg);
+        this.addDebugSnapshot({ moduleName: this.name, sourceUrl: url, errorType: "redirect", errorMsg, html: await captureHtml(), capturedAt: new Date().toISOString() });
       } else if (isNoResults) {
-        // Right page, bolha explicitly says no results
+        // Right page, bolha explicitly says no results (WARN only, no snapshot needed)
         this.logger.warn({ url, pageTitle, pageUrl }, "Empty search results — no listings matched this query");
       } else {
         // Right page, no "no results" message, but item selector matched nothing —
         // bolha likely changed their HTML class names
-        this.logger.error(
-          { url, pageTitle, pageUrl },
-          "Item selector (.EntityList-item) not found inside results container — bolha may have changed their HTML",
-        );
+        const errorMsg = "Item selector (.EntityList-item) not found inside results container — bolha may have changed their HTML";
+        this.logger.error({ url, pageTitle, pageUrl }, errorMsg);
+        this.addDebugSnapshot({ moduleName: this.name, sourceUrl: url, errorType: "selector_broken", errorMsg, html: await captureHtml(), capturedAt: new Date().toISOString() });
       }
       return [];
     }

@@ -1,4 +1,4 @@
-import type { Listing, LogEntry, DbConfig, DiffSummary } from "./shared/types.js";
+import type { Listing, LogEntry, DbConfig, DiffSummary, DebugSnapshotData } from "./shared/types.js";
 
 export interface Schedule {
   intervalMs: number;
@@ -13,6 +13,7 @@ export interface PushResultsParams {
   filteredListings?: Listing[];
   failedUrls?: string[];
   retried?: boolean;
+  debugSnapshots?: DebugSnapshotData[];
 }
 
 export interface PushResultsResponse {

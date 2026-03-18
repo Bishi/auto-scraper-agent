@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import type { Listing } from "../types.js";
+import type { Listing, DebugSnapshotData } from "../types.js";
 import type { NormalizedUrl } from "../config.js";
 import type { Logger } from "pino";
 
@@ -23,6 +23,17 @@ export interface ScraperModuleConfig {
 export abstract class ScraperModule {
   /** URLs that failed during the last run() call (used by main.ts to avoid false removals) */
   lastFailedUrls: string[] = [];
+
+  /**
+   * HTML snapshots captured during ERROR-level parse failures in the last run().
+   * Uploaded to the server via POST /api/agent/results so admins can diagnose
+   * broken selectors, redirects, and bot blocks from the dashboard.
+   */
+  lastDebugSnapshots: DebugSnapshotData[] = [];
+
+  protected addDebugSnapshot(snapshot: DebugSnapshotData): void {
+    this.lastDebugSnapshots.push(snapshot);
+  }
 
   /**
    * sourceIds of listings excluded by the price filter during the last run().
@@ -61,6 +72,7 @@ export abstract class ScraperModule {
     this.lastFailedUrls = [];
     this.lastFilteredSourceIds = new Set();
     this.lastFilteredListings = [];
+    this.lastDebugSnapshots = [];
     const allListings: Listing[] = [];
 
     const activeUrls = this.config.urls.filter((u) => u.enabled !== false);

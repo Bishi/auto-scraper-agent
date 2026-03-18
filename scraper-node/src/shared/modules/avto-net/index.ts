@@ -90,32 +90,34 @@ export class AvtoNetModule extends ScraperModule {
         }))
         .catch(() => ({ pageTitle: "unknown", pageUrl: url, onResultsPage: false, hasActualRows: false }));
 
+      const captureHtml = async (): Promise<string> => {
+        const raw = await page.content().catch(() => "");
+        return raw.length > 2_000_000 ? raw.slice(0, 2_000_000) : raw;
+      };
+
       // A Cloudflare managed challenge keeps the browser on the original
       // results.asp URL, so onResultsPage stays true even though we're blocked.
       // Detect this before the onResultsPage/hasActualRows three-way check so
       // it routes as ERROR (bot block) instead of WARN (empty search).
       if (isChallengeTitle(pageTitle)) {
-        this.logger.error(
-          { url, pageTitle, pageUrl },
-          "Cloudflare challenge page — bot detection blocked the scrape (locale-localised title detected)",
-        );
+        const errorMsg = "Cloudflare challenge page — bot detection blocked the scrape (locale-localised title detected)";
+        this.logger.error({ url, pageTitle, pageUrl }, errorMsg);
+        this.addDebugSnapshot({ moduleName: this.name, sourceUrl: url, errorType: "bot_block", errorMsg, html: await captureHtml(), capturedAt: new Date().toISOString() });
         return [];
       }
 
       if (!onResultsPage) {
         // Wrong page entirely — redirect, 404, bot block, or completely broken URL
-        this.logger.error(
-          { url, pageTitle, pageUrl },
-          "Not on results page — URL redirected unexpectedly, wrong URL, or bot block",
-        );
+        const errorMsg = "Not on results page — URL redirected unexpectedly, wrong URL, or bot block";
+        this.logger.error({ url, pageTitle, pageUrl }, errorMsg);
+        this.addDebugSnapshot({ moduleName: this.name, sourceUrl: url, errorType: "redirect", errorMsg, html: await captureHtml(), capturedAt: new Date().toISOString() });
       } else if (hasActualRows) {
         // Right page, rows exist in the DOM, but our selector didn't match — class name changed
-        this.logger.error(
-          { url, pageTitle, pageUrl },
-          "Item selector (.GO-Results-Row) not found by configured selector — avto.net may have changed their HTML",
-        );
+        const errorMsg = "Item selector (.GO-Results-Row) not found by configured selector — avto.net may have changed their HTML";
+        this.logger.error({ url, pageTitle, pageUrl }, errorMsg);
+        this.addDebugSnapshot({ moduleName: this.name, sourceUrl: url, errorType: "selector_broken", errorMsg, html: await captureHtml(), capturedAt: new Date().toISOString() });
       } else {
-        // Right page, no rows at all — genuine empty search
+        // Right page, no rows at all — genuine empty search (WARN only, no snapshot needed)
         this.logger.warn({ url, pageTitle, pageUrl }, "Empty search results — no listings matched this query");
       }
       return [];

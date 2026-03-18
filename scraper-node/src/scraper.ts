@@ -8,7 +8,7 @@ import { BrowserManager } from "./shared/browser/context.js";
 import { getModule } from "./shared/modules/registry.js";
 import { normalizeUrlEntry } from "./shared/config.js";
 import type { UrlEntry } from "./shared/config.js";
-import type { Listing, LogEntry, DbModuleConfig } from "./shared/types.js";
+import type { Listing, LogEntry, DbModuleConfig, DebugSnapshotData } from "./shared/types.js";
 
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
@@ -55,6 +55,7 @@ export interface ScrapeResult {
   filteredListings: Listing[];
   failedUrls: string[];
   hadManagedChallenge: boolean;
+  debugSnapshots: DebugSnapshotData[];
 }
 
 export async function runModule(
@@ -106,6 +107,7 @@ export async function runModule(
       filteredListings: module.lastFilteredListings,
       failedUrls: module.lastFailedUrls,
       hadManagedChallenge,
+      debugSnapshots: module.lastDebugSnapshots,
     };
   } finally {
     await browser.close();

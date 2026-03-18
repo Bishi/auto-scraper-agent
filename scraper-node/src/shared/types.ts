@@ -47,6 +47,17 @@ export interface DbModuleConfig {
   options?: Record<string, unknown>;
 }
 
+export interface DebugSnapshotData {
+  moduleName: string;
+  sourceUrl: string;
+  /** "redirect" | "selector_broken" | "bot_block" */
+  errorType: "redirect" | "selector_broken" | "bot_block";
+  errorMsg: string;
+  /** Raw page HTML, truncated to 2 MB before upload. */
+  html: string;
+  capturedAt: string; // ISO 8601
+}
+
 export interface DbConfig {
   browser?: { headless?: boolean; slowMo?: number; timeout?: number };
   logging?: { level?: string; pretty?: boolean };

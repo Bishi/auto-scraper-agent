@@ -116,6 +116,7 @@ export class Scheduler {
           filteredListings: result.filteredListings,
           failedUrls: result.failedUrls,
           retried: wasRetried,
+          debugSnapshots: result.debugSnapshots,
         });
         const s = response.summary;
         console.log(
