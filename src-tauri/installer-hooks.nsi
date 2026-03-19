@@ -16,6 +16,15 @@
 
 ; ── POSTINSTALL ──────────────────────────────────────────────────────────────
 ; Restore normal overwrite mode after the large-binary skip window.
+; Also self-delete the installer if it was auto-downloaded by the agent's
+; update flow (named "auto-scraper-agent-*-setup.exe").  User-downloaded
+; GitHub release assets use a different naming scheme and are left intact.
 !macro NSIS_HOOK_POSTINSTALL
   SetOverwrite on
+  !include "FileFunc.nsh"
+  ${GetFileName} "$EXEPATH" $R0
+  StrCpy $R1 "$R0" 19
+  ${If} $R1 == "auto-scraper-agent-"
+    Delete "$EXEPATH"
+  ${EndIf}
 !macroend
