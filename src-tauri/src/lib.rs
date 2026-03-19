@@ -1,3 +1,7 @@
+use std::fs::File;
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -12,6 +16,9 @@ use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 use serde::Deserialize;
 use tauri::menu::PredefinedMenuItem;
+
+// Prevents two concurrent update flows (startup check + manual "Check for Updates" click).
+static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -122,6 +129,187 @@ fn check_for_update(current_version: &str) -> Option<String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Update dialogs — PowerShell MessageBox (no extra dependencies, Windows-only)
+// ---------------------------------------------------------------------------
+
+/// Show a Yes/No dialog. Returns true if the user clicked Yes.
+fn dialog_yes_no(title: &str, message: &str) -> bool {
+    // Escape single quotes for PowerShell string literals
+    let msg   = message.replace('\'', "''");
+    let title = title.replace('\'', "''");
+    let script = format!(
+        "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; \
+         [System.Windows.Forms.MessageBox]::Show('{msg}', '{title}', \
+         'YesNo', 'Question') -eq 'Yes'"
+    );
+    std::process::Command::new("powershell")
+        .args(["-WindowStyle", "Hidden", "-NonInteractive", "-Command", &script])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "True")
+        .unwrap_or(false)
+}
+
+/// Show an informational OK dialog.
+fn dialog_ok(title: &str, message: &str) {
+    let msg   = message.replace('\'', "''");
+    let title = title.replace('\'', "''");
+    let script = format!(
+        "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; \
+         [System.Windows.Forms.MessageBox]::Show('{msg}', '{title}', \
+         'OK', 'Information') | Out-Null"
+    );
+    let _ = std::process::Command::new("powershell")
+        .args(["-WindowStyle", "Hidden", "-NonInteractive", "-Command", &script])
+        .output();
+}
+
+// ---------------------------------------------------------------------------
+// Installer download
+// ---------------------------------------------------------------------------
+
+fn installer_download_url(tag: &str) -> String {
+    let version = tag.trim_start_matches('v');
+    format!(
+        "https://github.com/Bishi/auto-scraper-agent/releases/download/{tag}/\
+         Auto-Scraper-Agent_{version}_x64-setup.exe"
+    )
+}
+
+fn set_tray_tooltip(app: &AppHandle, msg: &str) {
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(msg));
+    }
+}
+
+/// Stream the installer for `tag` to %TEMP%, updating the tray tooltip with
+/// download progress.  Returns the path to the downloaded file.
+///
+/// If the file is already fully downloaded (correct size), skips the network
+/// request entirely.
+fn download_installer(tag: &str, app: &AppHandle) -> Result<PathBuf, String> {
+    let version = tag.trim_start_matches('v');
+    let url     = installer_download_url(tag);
+    let dest    = std::env::temp_dir()
+        .join(format!("auto-scraper-agent-{version}-setup.exe"));
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300)) // 5 min — large file
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // HEAD request to learn expected file size (used for progress + skip check)
+    let total_bytes: u64 = client
+        .head(&url)
+        .send()
+        .ok()
+        .and_then(|r| r.content_length())
+        .unwrap_or(0);
+
+    // Skip download if the file is already complete
+    if total_bytes > 0 {
+        if let Ok(meta) = std::fs::metadata(&dest) {
+            if meta.len() == total_bytes {
+                eprintln!("[agent] Installer already downloaded: {}", dest.display());
+                return Ok(dest);
+            }
+        }
+    }
+
+    eprintln!("[agent] Downloading installer from {url}");
+    set_tray_tooltip(app, "Auto-Scraper — Starting download…");
+
+    let mut response = client.get(&url).send().map_err(|e| e.to_string())?;
+    let mut file     = File::create(&dest).map_err(|e| e.to_string())?;
+
+    let mut downloaded: u64 = 0;
+    let mut buf = vec![0u8; 65_536]; // 64 KB chunks
+
+    loop {
+        let n = response.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 { break; }
+        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        downloaded += n as u64;
+
+        let tooltip = if total_bytes > 0 {
+            format!(
+                "Auto-Scraper — Downloading update: {} / {} MB ({}%)",
+                downloaded  / 1_048_576,
+                total_bytes / 1_048_576,
+                downloaded * 100 / total_bytes,
+            )
+        } else {
+            format!("Auto-Scraper — Downloading update: {} MB", downloaded / 1_048_576)
+        };
+        set_tray_tooltip(app, &tooltip);
+    }
+
+    eprintln!("[agent] Download complete: {}", dest.display());
+    Ok(dest)
+}
+
+// ---------------------------------------------------------------------------
+// Full update flow: dialog → download → install dialog → launch → exit
+// ---------------------------------------------------------------------------
+
+/// Called whenever we know `latest_tag` is newer than the running version.
+/// Guards against concurrent calls with UPDATE_IN_PROGRESS.
+fn handle_update_available(app: &AppHandle, latest_tag: &str) {
+    // Only one update flow at a time
+    if UPDATE_IN_PROGRESS.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let version = latest_tag.trim_start_matches('v');
+    let current = app.package_info().version.to_string();
+
+    let want_download = dialog_yes_no(
+        "Update Available",
+        &format!(
+            "Auto-Scraper Agent v{version} is available  (you have v{current}).\n\n\
+             Download and install now?  (~150 MB)\n\n\
+             Progress will be shown in the tray tooltip."
+        ),
+    );
+
+    if !want_download {
+        UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
+        set_tray_tooltip(app, &format!("Auto-Scraper Agent — Update available: v{version}"));
+        return;
+    }
+
+    match download_installer(latest_tag, app) {
+        Ok(installer_path) => {
+            set_tray_tooltip(app, "Auto-Scraper Agent — Update ready");
+
+            let want_install = dialog_yes_no(
+                "Update Ready",
+                &format!(
+                    "v{version} has been downloaded.\n\n\
+                     Install now?  The agent will restart automatically."
+                ),
+            );
+
+            if want_install {
+                eprintln!("[agent] Launching installer: {}", installer_path.display());
+                let _ = std::process::Command::new(&installer_path).spawn();
+                app.exit(0);
+            } else {
+                // Keep the file for next time; reset the flag so the user can
+                // trigger installation again from the tray menu.
+                UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
+                set_tray_tooltip(app, "Auto-Scraper Agent — Update ready (not yet installed)");
+            }
+        }
+        Err(e) => {
+            eprintln!("[agent] Download failed: {e}");
+            UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
+            set_tray_tooltip(app, "Auto-Scraper Agent");
+            dialog_ok("Download Failed", &format!("Could not download the update:\n\n{e}"));
+        }
+    }
+}
+
 fn sidecar_has_api_key() -> bool {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(2))
@@ -214,15 +402,14 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
             thread::spawn(move || {
                 match check_for_update(&current_version) {
                     Some(latest_tag) => {
-                        eprintln!("[agent] Update available: {}", latest_tag);
-                        let url = format!(
-                            "https://github.com/Bishi/auto-scraper-agent/releases/tag/{}",
-                            latest_tag
-                        );
-                        let _ = app_clone.opener().open_url(&url, None::<String>);
+                        handle_update_available(&app_clone, &latest_tag);
                     }
                     None => {
                         eprintln!("[agent] App is up to date");
+                        dialog_ok(
+                            "Up to Date",
+                            &format!("Auto-Scraper Agent v{current_version} is the latest version."),
+                        );
                     }
                 }
             });
@@ -353,21 +540,16 @@ pub fn run() {
             });
 
             // Background thread: check GitHub releases for a newer version on startup
-            // (after a 15 s delay so it doesn't slow first launch) and every 4 hours.
-            // If an update is found, the tray tooltip is updated to alert the user.
+            // (after a 15 s delay so it doesn't slow first launch).
+            // If an update is found, show a dialog so the user can download + install.
+            // Only runs once per session — we break after showing the dialog.
             let update_check_handle = app.handle().clone();
             let current_version = app.package_info().version.to_string();
             thread::spawn(move || {
                 thread::sleep(Duration::from_secs(15));
-                loop {
-                    if let Some(latest_tag) = check_for_update(&current_version) {
-                        eprintln!("[agent] Update available: {}", latest_tag);
-                        if let Some(tray) = update_check_handle.tray_by_id("main") {
-                            let msg = format!("Auto-Scraper Agent — Update available: {}", latest_tag);
-                            let _ = tray.set_tooltip(Some(msg.as_str()));
-                        }
-                    }
-                    thread::sleep(Duration::from_secs(4 * 60 * 60));
+                if let Some(latest_tag) = check_for_update(&current_version) {
+                    eprintln!("[agent] Update available: {}", latest_tag);
+                    handle_update_available(&update_check_handle, &latest_tag);
                 }
             });
 
