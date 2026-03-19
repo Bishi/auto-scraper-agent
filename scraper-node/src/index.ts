@@ -1,5 +1,5 @@
 import http from "node:http";
-import { rmSync, existsSync } from "node:fs";
+import { rmSync, existsSync, appendFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { readConfig, writeConfig } from "./store.js";
@@ -10,11 +10,11 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.4.17";
+const AGENT_VERSION = "0.4.18";
 
 // ---------------------------------------------------------------------------
-// In-memory log ring buffer — captured from all console.log/error calls
-// so the renderer can display them in the Logs tab.
+// Log buffer — persisted to ~/.auto-scraper/agent.log (NDJSON) so history
+// survives agent restarts. In-memory ring kept at MAX_LOG_LINES for the UI.
 // ---------------------------------------------------------------------------
 
 interface LogEntry {
@@ -23,13 +23,37 @@ interface LogEntry {
   msg: string;
 }
 
-const LOG_BUFFER: LogEntry[] = [];
-const MAX_LOG_LINES = 300;
+const LOG_DIR  = join(homedir(), ".auto-scraper", "logs");
+const LOG_FILE = join(LOG_DIR, "agent.log");
+const MAX_LOG_LINES      = 300;  // in-memory ring shown in UI
+const MAX_LOG_FILE_LINES = 5000; // rotate file when it exceeds this
+
+// Ensure the logs directory exists before reading or writing.
+try { mkdirSync(LOG_DIR, { recursive: true }); } catch { /* ignore */ }
+
+// Load existing log history from disk into the ring buffer on startup.
+const LOG_BUFFER: LogEntry[] = (() => {
+  try {
+    const lines = readFileSync(LOG_FILE, "utf8").split("\n").filter(Boolean);
+    // Trim the file if it has grown too large.
+    if (lines.length > MAX_LOG_FILE_LINES) {
+      const trimmed = lines.slice(-MAX_LOG_FILE_LINES);
+      writeFileSync(LOG_FILE, trimmed.join("\n") + "\n", "utf8");
+      return trimmed.slice(-MAX_LOG_LINES).map((l) => JSON.parse(l) as LogEntry);
+    }
+    return lines.slice(-MAX_LOG_LINES).map((l) => JSON.parse(l) as LogEntry);
+  } catch {
+    return [];
+  }
+})();
 
 function pushLog(level: "info" | "error", ...args: unknown[]): void {
-  const msg = args.map((a) => (typeof a === "string" ? a : String(a))).join(" ");
-  LOG_BUFFER.push({ ts: new Date().toISOString(), level, msg });
+  const entry: LogEntry = { ts: new Date().toISOString(), level, msg: args.map((a) => (typeof a === "string" ? a : String(a))).join(" ") };
+  LOG_BUFFER.push(entry);
   if (LOG_BUFFER.length > MAX_LOG_LINES) LOG_BUFFER.shift();
+  try {
+    appendFileSync(LOG_FILE, JSON.stringify(entry) + "\n", "utf8");
+  } catch { /* non-fatal — UI still works via in-memory buffer */ }
 }
 
 // Intercept all console output so every module's logs are captured.
