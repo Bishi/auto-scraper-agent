@@ -1,6 +1,7 @@
 export const SELECTORS = {
   /** Container for each listing row in search results */
-  listingRow: ".GO-Results-Row",
+  // INTENTIONALLY BROKEN FOR DEBUG SNAPSHOT TESTING — revert to ".GO-Results-Row" when done
+  listingRow: ".GO-Results-Row-BROKEN-TEST",
   /** Title/name div - contains a <span> with the car name */
   title: ".GO-Results-Naziv span",
   /**
