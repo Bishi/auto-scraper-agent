@@ -94,7 +94,7 @@ export class Scheduler {
 
   private startHeartbeat(client: AgentApiClient): void {
     const beat = (): void => {
-      client.heartbeat(this._version, process.platform, undefined, this.nextRunAt)
+      client.heartbeat(this._version, process.platform)
         .then((res) => {
           // Act on server-side command (one-shot, already cleared server-side)
           if (res.command === "scrape_now" && !this._running) {
@@ -222,7 +222,7 @@ export class Scheduler {
         );
       } catch (err) {
         console.error(`[agent] Failed to scrape/push ${moduleName}:`, err);
-        client.heartbeat(this._version, process.platform, String(err), this.nextRunAt).catch(() => {});
+        client.heartbeat(this._version, process.platform, String(err)).catch(() => {});
       }
     }
 

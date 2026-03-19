@@ -64,7 +64,6 @@ export class AgentApiClient {
     version: string,
     platform: string,
     failureMsg?: string,
-    nextRunAt?: number | null,
   ): Promise<{ ok: boolean; command?: string | null; paused?: boolean }> {
     return this.request<{ ok: boolean; command?: string | null; paused?: boolean }>("/api/agent/heartbeat", {
       method: "POST",
@@ -72,7 +71,6 @@ export class AgentApiClient {
         version,
         platform,
         ...(failureMsg ? { failureMsg } : {}),
-        nextRunAt: nextRunAt ?? null,
       }),
     });
   }
