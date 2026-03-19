@@ -197,6 +197,9 @@ fn installer_download_url(tag: &str) -> String {
 
 fn set_tray_tooltip(app: &AppHandle, msg: &str) {
     if let Some(tray) = app.tray_by_id("main") {
+        // Toggling to a zero-width space before setting the real text forces
+        // Windows to re-render the tooltip popup if it's currently displayed.
+        let _ = tray.set_tooltip(Some("\u{200B}"));
         let _ = tray.set_tooltip(Some(msg));
     }
 }
@@ -327,7 +330,15 @@ fn handle_update_available(app: &AppHandle, latest_tag: &str) {
 
             if want_install {
                 eprintln!("[agent] Launching installer: {}", installer_path.display());
-                let _ = std::process::Command::new(&installer_path).spawn();
+                // Use PowerShell Start-Process (→ ShellExecuteW) instead of
+                // Command::new (→ CreateProcess) so Windows handles UAC elevation
+                // for the installer's requireAdministrator manifest entry.
+                let escaped = installer_path.to_string_lossy().replace('\'', "''");
+                let _ = std::process::Command::new("powershell")
+                    .args(["-WindowStyle", "Hidden", "-NonInteractive", "-Command",
+                           &format!("Start-Process -FilePath '{escaped}'")])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .spawn();
                 app.exit(0);
             } else {
                 // Keep the file for next time; reset the flag so the user can
