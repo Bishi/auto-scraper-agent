@@ -185,8 +185,13 @@ fn set_tray_tooltip(app: &AppHandle, msg: &str) {
 /// Stream the installer for `tag` to %TEMP%, updating the tray tooltip with
 /// download progress.  Returns the path to the downloaded file.
 ///
-/// If the file is already fully downloaded (correct size), skips the network
-/// request entirely.
+/// Uses a GET (not HEAD) so redirects are followed before checking the status
+/// and content-length — GitHub release assets redirect to a CDN and HEAD often
+/// returns 0 for content-length on the redirect response.
+///
+/// Fails immediately with a clear error if the server returns a non-2xx status
+/// (e.g. 404 when the CI hasn't finished uploading the asset yet), preventing
+/// a GitHub HTML error page from being written to disk as a fake installer.
 fn download_installer(tag: &str, app: &AppHandle) -> Result<PathBuf, String> {
     let version = tag.trim_start_matches('v');
     let url     = installer_download_url(tag);
@@ -198,15 +203,25 @@ fn download_installer(tag: &str, app: &AppHandle) -> Result<PathBuf, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    // HEAD request to learn expected file size (used for progress + skip check)
-    let total_bytes: u64 = client
-        .head(&url)
-        .send()
-        .ok()
-        .and_then(|r| r.content_length())
-        .unwrap_or(0);
+    // Open the connection first so we can validate the status before touching disk.
+    let mut response = client.get(&url).send().map_err(|e| e.to_string())?;
 
-    // Skip download if the file is already complete
+    // Fail fast — a non-success status means the release asset doesn't exist yet.
+    // Without this check, a 404 HTML page gets saved as the installer and Windows
+    // rejects it as an "Unsupported 16-bit Application".
+    if !response.status().is_success() {
+        return Err(format!(
+            "HTTP {} — release asset not found for v{version}.\n\
+             The installer may still be building. Try again in a few minutes,\n\
+             or download manually from github.com/Bishi/auto-scraper-agent/releases.",
+            response.status().as_u16()
+        ));
+    }
+
+    // content_length() from the CDN response (after redirects) is reliable here.
+    let total_bytes: u64 = response.content_length().unwrap_or(0);
+
+    // Skip download if the file is already fully present (sizes must match).
     if total_bytes > 0 {
         if let Ok(meta) = std::fs::metadata(&dest) {
             if meta.len() == total_bytes {
@@ -216,12 +231,13 @@ fn download_installer(tag: &str, app: &AppHandle) -> Result<PathBuf, String> {
         }
     }
 
+    // Remove any stale / partial file from a previous failed attempt.
+    let _ = std::fs::remove_file(&dest);
+
     eprintln!("[agent] Downloading installer from {url}");
     set_tray_tooltip(app, "Auto-Scraper — Starting download…");
 
-    let mut response = client.get(&url).send().map_err(|e| e.to_string())?;
-    let mut file     = File::create(&dest).map_err(|e| e.to_string())?;
-
+    let mut file = File::create(&dest).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
     let mut buf = vec![0u8; 65_536]; // 64 KB chunks
 
@@ -244,7 +260,7 @@ fn download_installer(tag: &str, app: &AppHandle) -> Result<PathBuf, String> {
         set_tray_tooltip(app, &tooltip);
     }
 
-    eprintln!("[agent] Download complete: {}", dest.display());
+    eprintln!("[agent] Download complete: {} bytes", downloaded);
     Ok(dest)
 }
 
