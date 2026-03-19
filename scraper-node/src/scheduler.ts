@@ -11,6 +11,7 @@ export class Scheduler {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private _running = false;
   private _paused = false;
+  private _stopRequested = false;
   private _version = "";
   /** True while a scrape cycle is actively executing. */
   get isRunning(): boolean { return this._running; }
@@ -33,6 +34,16 @@ export class Scheduler {
     this.heartbeatTimer = null;
     this.nextRunAt = null;
     this._paused = false;
+  }
+
+  /** Request an in-progress scrape to halt after the current module completes. */
+  stopScrape(): void {
+    if (this._running) {
+      this._stopRequested = true;
+      console.log("[agent] Stop requested — will halt after current module completes");
+    } else {
+      console.log("[agent] Stop requested but no scrape is in progress");
+    }
   }
 
   /** Suspend scraping without stopping the heartbeat. */
@@ -70,6 +81,9 @@ export class Scheduler {
             console.log("[agent] Server command: scrape_now");
             void this.triggerNow(client, "server");
           }
+          if (res.command === "stop_scrape") {
+            this.stopScrape();
+          }
           // Sync pause state from server
           if (res.paused === true && !this._paused) {
             this.pause();
@@ -90,6 +104,7 @@ export class Scheduler {
   private async runCycle(client: AgentApiClient, scheduleNext = true, trigger: Trigger = "startup"): Promise<void> {
     if (this._running) return;
     this._running = true;
+    this._stopRequested = false;
     this.nextRunAt = null; // clear while running
     let intervalMs = 30 * 60 * 1000; // default 30 min
 
@@ -146,6 +161,11 @@ export class Scheduler {
       : undefined;
 
     for (const [moduleName, moduleConfig] of enabled) {
+      if (this._stopRequested) {
+        this._stopRequested = false;
+        console.log("[agent] ──────────── Scrape halted by user request ────────────");
+        break;
+      }
       console.log(`[agent] Scraping ${moduleName}...`);
       const moduleStartedAt = new Date();
       try {

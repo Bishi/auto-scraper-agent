@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.3.9";
+const AGENT_VERSION = "0.4.0";
 
 // ---------------------------------------------------------------------------
 // In-memory log ring buffer — captured from all console.log/error calls
@@ -159,6 +159,15 @@ const server = http.createServer((req, res) => {
         }
         void scheduler.triggerNow(client);
         return sendJson(res, 200, { ok: true, message: "Scrape triggered" });
+      }
+
+      if (method === "POST" && pathname === "/scrape/stop") {
+        const wasRunning = scheduler.isRunning;
+        scheduler.stopScrape();
+        return sendJson(res, 200, {
+          ok: true,
+          message: wasRunning ? "Stop requested — will halt after current module completes" : "No scrape in progress",
+        });
       }
 
       if (method === "POST" && pathname === "/stop") {

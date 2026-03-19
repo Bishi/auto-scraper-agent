@@ -11,6 +11,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 use serde::Deserialize;
+use tauri::menu::PredefinedMenuItem;
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -94,6 +95,33 @@ struct ScheduleResponse {
     next_run_at: Option<u64>, // epoch ms, null while running or not configured
 }
 
+#[derive(Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+}
+
+/// Check GitHub releases API for a newer version.
+/// Returns Some(tag_name) like "v0.4.0" if an update is available, None otherwise.
+fn check_for_update(current_version: &str) -> Option<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .ok()?;
+    let release: GitHubRelease = client
+        .get("https://api.github.com/repos/Bishi/auto-scraper-agent/releases/latest")
+        .header("User-Agent", "auto-scraper-agent")
+        .send()
+        .ok()?
+        .json()
+        .ok()?;
+    let latest = release.tag_name.trim_start_matches('v');
+    if latest != current_version {
+        Some(release.tag_name)
+    } else {
+        None
+    }
+}
+
 fn sidecar_has_api_key() -> bool {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(2))
@@ -152,11 +180,13 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
 // ---------------------------------------------------------------------------
 
 fn build_tray_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let run_now = MenuItem::with_id(app, "run_now", "Run Now", true, None::<&str>)?;
-    let open    = MenuItem::with_id(app, "open",    "Open Dashboard", true, None::<&str>)?;
-    let setup   = MenuItem::with_id(app, "setup",   "Settings / Setup", true, None::<&str>)?;
-    let quit    = MenuItem::with_id(app, "quit",    "Quit", true, None::<&str>)?;
-    Menu::with_items(app, &[&run_now, &open, &setup, &quit])
+    let run_now       = MenuItem::with_id(app, "run_now",       "Run Now",             true, None::<&str>)?;
+    let open          = MenuItem::with_id(app, "open",          "Open Dashboard",      true, None::<&str>)?;
+    let setup         = MenuItem::with_id(app, "setup",         "Settings / Setup",    true, None::<&str>)?;
+    let check_updates = MenuItem::with_id(app, "check_updates", "Check for Updates",   true, None::<&str>)?;
+    let sep           = PredefinedMenuItem::separator(app)?;
+    let quit          = MenuItem::with_id(app, "quit",          "Quit",                true, None::<&str>)?;
+    Menu::with_items(app, &[&run_now, &open, &setup, &sep, &check_updates, &quit])
 }
 
 fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
@@ -177,6 +207,25 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
         }
         "setup" => {
             open_setup_window(app, None);
+        }
+        "check_updates" => {
+            let app_clone = app.clone();
+            let current_version = app.package_info().version.to_string();
+            thread::spawn(move || {
+                match check_for_update(&current_version) {
+                    Some(latest_tag) => {
+                        eprintln!("[agent] Update available: {}", latest_tag);
+                        let url = format!(
+                            "https://github.com/Bishi/auto-scraper-agent/releases/tag/{}",
+                            latest_tag
+                        );
+                        let _ = app_clone.opener().open_url(&url, None::<String>);
+                    }
+                    None => {
+                        eprintln!("[agent] App is up to date");
+                    }
+                }
+            });
         }
         "quit" => {
             let _ = reqwest::blocking::Client::new()
@@ -300,6 +349,25 @@ pub fn run() {
                     open_setup_window(&handle, tab);
                 } else {
                     eprintln!("[agent] Sidecar did not start within 10 seconds");
+                }
+            });
+
+            // Background thread: check GitHub releases for a newer version on startup
+            // (after a 15 s delay so it doesn't slow first launch) and every 4 hours.
+            // If an update is found, the tray tooltip is updated to alert the user.
+            let update_check_handle = app.handle().clone();
+            let current_version = app.package_info().version.to_string();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_secs(15));
+                loop {
+                    if let Some(latest_tag) = check_for_update(&current_version) {
+                        eprintln!("[agent] Update available: {}", latest_tag);
+                        if let Some(tray) = update_check_handle.tray_by_id("main") {
+                            let msg = format!("Auto-Scraper Agent — Update available: {}", latest_tag);
+                            let _ = tray.set_tooltip(Some(msg.as_str()));
+                        }
+                    }
+                    thread::sleep(Duration::from_secs(4 * 60 * 60));
                 }
             });
 
