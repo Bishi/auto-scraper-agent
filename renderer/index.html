@@ -172,6 +172,35 @@
       }
       button.ghost:hover { background: #1e293b; color: #e2e8f0; }
 
+      button.danger {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #7f1d1d;
+        border-radius: 6px;
+        background: #1c0a0a;
+        color: #fca5a5;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      button.danger:hover    { background: #450a0a; }
+      button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      .section-divider {
+        margin: 18px 0 12px;
+        border: none;
+        border-top: 1px solid #1e293b;
+      }
+      .section-label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #475569;
+        margin-bottom: 8px;
+      }
+
       button.run {
         padding: 4px 12px;
         min-width: 96px;
@@ -265,6 +294,13 @@
         <div class="alert success" id="success-msg">Saved! Agent will scrape on schedule.</div>
 
         <button class="run" id="run-scrape-settings-btn" style="margin-top:16px;width:100%;padding:8px">▶ Run Scrape</button>
+
+        <hr class="section-divider" />
+        <div class="section-label">Troubleshooting</div>
+        <button class="danger" id="clear-profile-btn">🗑 Clear Browser Profile</button>
+        <div class="alert error"   id="clear-profile-error"></div>
+        <div class="alert success" id="clear-profile-success">Browser profile cleared — will start fresh on next scrape.</div>
+        <p class="hint" id="clear-profile-hint">Fixes Cloudflare blocks. Only available when no scrape is running.</p>
       </div>
 
       <!-- Logs panel -->
@@ -490,6 +526,7 @@
           if (!res.ok) { scheduleText.textContent = ""; return; }
           const data = await res.json();
           updatePauseBtn(!!data.paused);
+          updateClearProfileBtn(!!data.running);
           if (data.paused) {
             scheduleText.textContent = "· paused";
           } else if (data.running) {
@@ -534,6 +571,39 @@
           await pollSchedule();
         } catch { /* ignore */ } finally {
           pauseBtn.disabled = false;
+        }
+      });
+
+      // ── Clear browser profile ───────────────────────────────────────────────
+      const clearProfileBtn     = document.getElementById("clear-profile-btn");
+      const clearProfileError   = document.getElementById("clear-profile-error");
+      const clearProfileSuccess = document.getElementById("clear-profile-success");
+
+      // Keep the button disabled while a scrape is running
+      function updateClearProfileBtn(running) {
+        clearProfileBtn.disabled = running;
+      }
+
+      clearProfileBtn.addEventListener("click", async () => {
+        clearProfileError.style.display   = "none";
+        clearProfileSuccess.style.display = "none";
+        clearProfileBtn.disabled    = true;
+        clearProfileBtn.textContent = "Clearing…";
+        try {
+          const res  = await fetch(`${SIDECAR}/clear-profile`, { method: "POST" });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            clearProfileSuccess.style.display = "block";
+          } else {
+            clearProfileError.textContent   = data.error ?? `Error ${res.status}`;
+            clearProfileError.style.display = "block";
+          }
+        } catch (err) {
+          clearProfileError.textContent   = String(err);
+          clearProfileError.style.display = "block";
+        } finally {
+          clearProfileBtn.disabled    = false;
+          clearProfileBtn.textContent = "🗑 Clear Browser Profile";
         }
       });
 
