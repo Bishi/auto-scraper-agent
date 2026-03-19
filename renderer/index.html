@@ -216,6 +216,20 @@
       button.run:hover    { background: #14532d; }
       button.run:disabled { opacity: 0.5; cursor: not-allowed; }
 
+      button.stop {
+        padding: 4px 12px;
+        border: 1px solid #7f1d1d;
+        border-radius: 4px;
+        background: #1c0a0a;
+        color: #fca5a5;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      button.stop:hover    { background: #450a0a; }
+      button.stop:disabled { opacity: 0.35; cursor: not-allowed; }
+
       button.pause {
         padding: 3px 10px;
         border: 1px solid #334155;
@@ -293,7 +307,10 @@
         <div class="alert error"   id="error-msg"></div>
         <div class="alert success" id="success-msg">Saved! Agent will scrape on schedule.</div>
 
-        <button class="run" id="run-scrape-settings-btn" style="margin-top:16px;width:100%;padding:8px">▶ Run Scrape</button>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="run"  id="run-scrape-settings-btn" style="flex:1;padding:8px">▶ Run Scrape</button>
+          <button class="stop" id="stop-scrape-settings-btn" style="flex:1;padding:8px" disabled>⏹ Stop Scrape</button>
+        </div>
 
         <hr class="section-divider" />
         <div class="section-label">Troubleshooting</div>
@@ -308,7 +325,8 @@
         <div class="logs-toolbar">
           <span id="log-count">0 entries</span>
           <div style="display:flex;gap:6px">
-            <button class="run" id="run-scrape-btn">▶ Run Scrape</button>
+            <button class="run"  id="run-scrape-btn">▶ Run Scrape</button>
+            <button class="stop" id="stop-scrape-btn" disabled>⏹ Stop</button>
             <button class="ghost" id="clear-btn">Clear</button>
           </div>
         </div>
@@ -526,7 +544,7 @@
           if (!res.ok) { scheduleText.textContent = ""; return; }
           const data = await res.json();
           updatePauseBtn(!!data.paused);
-          updateClearProfileBtn(!!data.running);
+          updateRunningState(!!data.running);
           if (data.paused) {
             scheduleText.textContent = "· paused";
           } else if (data.running) {
@@ -574,14 +592,34 @@
         }
       });
 
+      // ── Stop Scrape ─────────────────────────────────────────────────────────
+      const stopScrapeBtn         = document.getElementById("stop-scrape-btn");
+      const stopScrapeSettingsBtn = document.getElementById("stop-scrape-settings-btn");
+
+      async function doStopScrape(btn) {
+        btn.disabled    = true;
+        btn.textContent = "Stopping…";
+        try {
+          await fetch(`${SIDECAR}/scrape/stop`, { method: "POST" });
+        } catch { /* ignore */ }
+        setTimeout(() => { btn.textContent = "⏹ Stop" + (btn.id === "stop-scrape-settings-btn" ? " Scrape" : ""); }, 1500);
+      }
+
+      stopScrapeBtn.addEventListener("click",         () => doStopScrape(stopScrapeBtn));
+      stopScrapeSettingsBtn.addEventListener("click", () => doStopScrape(stopScrapeSettingsBtn));
+
       // ── Clear browser profile ───────────────────────────────────────────────
       const clearProfileBtn     = document.getElementById("clear-profile-btn");
       const clearProfileError   = document.getElementById("clear-profile-error");
       const clearProfileSuccess = document.getElementById("clear-profile-success");
 
-      // Keep the button disabled while a scrape is running
-      function updateClearProfileBtn(running) {
-        clearProfileBtn.disabled = running;
+      // Update all run/stop/clear-profile buttons based on whether a scrape is running
+      function updateRunningState(running) {
+        document.getElementById("run-scrape-btn").disabled          = running;
+        document.getElementById("run-scrape-settings-btn").disabled = running;
+        stopScrapeBtn.disabled         = !running;
+        stopScrapeSettingsBtn.disabled = !running;
+        clearProfileBtn.disabled       = running;
       }
 
       clearProfileBtn.addEventListener("click", async () => {
