@@ -183,7 +183,7 @@ fn installer_download_url(tag: &str) -> String {
     let version = tag.trim_start_matches('v');
     format!(
         "https://github.com/Bishi/auto-scraper-agent/releases/download/{tag}/\
-         Auto-Scraper-Agent_{version}_x64-setup.exe"
+         Auto-Scraper.Agent_{version}_x64-setup.exe"
     )
 }
 
