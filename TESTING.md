@@ -12,7 +12,7 @@ npm run dev
 
 Expected output:
 ```
-[agent] Auto-Scraper agent v0.1.x listening on http://127.0.0.1:9001
+[agent] Auto-Scraper agent v0.4.x listening on http://127.0.0.1:9001
 [agent] Loaded saved config: serverUrl=https://...
 ```
 
@@ -22,7 +22,7 @@ If no saved config: POST one first (see step 3).
 
 ```bash
 curl http://127.0.0.1:9001/health
-# → {"hasApiKey":true,"version":"0.1.x"}
+# → {"hasApiKey":true,"version":"0.4.x"}
 ```
 
 ## 3. Configure (first run or after wiping config)
@@ -76,10 +76,20 @@ Bump the version in **both** places, then commit and tag:
 ```bash
 # Edit both files, then:
 git add src-tauri/tauri.conf.json scraper-node/src/index.ts
-git commit -m "chore: bump version to 0.1.x"
-git tag v0.1.x
-git push && git push --tags
+git commit -m "chore: bump version to 0.4.x"
+git tag v0.4.x
+git push && git push origin v0.4.x
 ```
+
+> ⚠️ **Never `git push` without also pushing a tag.** A plain `git push` does NOT trigger a CI build. The tag push (`git push origin vX.Y.Z`) is what starts the GitHub Actions workflow.
+
+## 7. Testing the auto-update flow
+
+The agent checks for updates 15 seconds after launch via the GitHub Releases API. To test locally without a full release cycle:
+
+1. Temporarily change `check_for_update()` in `src-tauri/src/lib.rs` to return a hardcoded fake tag (e.g. `Some("v99.0.0".to_string())`).
+2. Run `cargo tauri dev` — after ~15 s a dialog should appear offering to download.
+3. Revert the change before committing.
 
 CI builds the NSIS installer and attaches it to a versioned GitHub Release.
 Download from the Releases page and run the installer.
@@ -128,3 +138,6 @@ Tagged `latest`, marked pre-release. Use for testing unreleased builds.
 2. Setup window opens (or skips if API key already saved)
 3. "Run Now" tray menu item triggers a scrape
 4. Dashboard shows the new scrape run with listings
+5. Tray tooltip shows next scrape time (updates after each completed run)
+6. Pause/Resume from the server dashboard propagates within one heartbeat (~60 s); resuming does **not** trigger an immediate scrape — the countdown is restored
+7. "Check for Updates" in tray shows "up to date" dialog when on latest version
