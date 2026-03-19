@@ -60,10 +60,20 @@ export class AgentApiClient {
     });
   }
 
-  async heartbeat(version: string, platform: string, failureMsg?: string): Promise<{ ok: boolean; command?: string | null; paused?: boolean }> {
+  async heartbeat(
+    version: string,
+    platform: string,
+    failureMsg?: string,
+    nextRunAt?: number | null,
+  ): Promise<{ ok: boolean; command?: string | null; paused?: boolean }> {
     return this.request<{ ok: boolean; command?: string | null; paused?: boolean }>("/api/agent/heartbeat", {
       method: "POST",
-      body: JSON.stringify({ version, platform, ...(failureMsg ? { failureMsg } : {}) }),
+      body: JSON.stringify({
+        version,
+        platform,
+        ...(failureMsg ? { failureMsg } : {}),
+        nextRunAt: nextRunAt ?? null,
+      }),
     });
   }
 }

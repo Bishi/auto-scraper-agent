@@ -13,6 +13,11 @@ export class Scheduler {
   private _paused = false;
   private _stopRequested = false;
   private _version = "";
+  /**
+   * Remaining ms that were left on the timer when pause() was called.
+   * Used by resume() to restore the countdown rather than scraping immediately.
+   */
+  private _pausedRemainingMs: number | null = null;
   /** True while a scrape cycle is actively executing. */
   get isRunning(): boolean { return this._running; }
   /** True when the scheduler is paused (heartbeat continues but scrapes are suspended). */
@@ -50,15 +55,30 @@ export class Scheduler {
   pause(): void {
     if (this.scrapeTimer) clearTimeout(this.scrapeTimer);
     this.scrapeTimer = null;
+    // Save remaining countdown so resume() can restore it instead of scraping immediately.
+    this._pausedRemainingMs = this.nextRunAt !== null
+      ? Math.max(0, this.nextRunAt - Date.now())
+      : null;
     this.nextRunAt = null;
     this._paused = true;
   }
 
-  /** Resume scraping — triggers an immediate cycle if one isn't already running. */
-  async resume(client: AgentApiClient): Promise<void> {
+  /**
+   * Resume scraping.  Restores the countdown that was active when pause() was called
+   * so the user isn't hit with an immediate scrape just for toggling pause.
+   * Enforces a 60-second minimum so a pause-immediately-unpause can't trigger a run.
+   */
+  resume(client: AgentApiClient): void {
     this._paused = false;
     if (this._running) return;
-    await this.runCycle(client, true, "resume");
+
+    const MIN_DELAY_MS = 60_000; // never run sooner than 1 min after resuming
+    const delay = Math.max(MIN_DELAY_MS, this._pausedRemainingMs ?? 30 * 60 * 1000);
+    this._pausedRemainingMs = null;
+
+    this.nextRunAt = Date.now() + delay;
+    console.log(`[agent] Resumed — next scrape in ${Math.round(delay / 60_000)} min`);
+    this.scrapeTimer = setTimeout(() => void this.runCycle(client, true, "schedule"), delay);
   }
 
   async triggerNow(client: AgentApiClient, trigger: "manual" | "server" = "manual"): Promise<void> {
@@ -74,7 +94,7 @@ export class Scheduler {
 
   private startHeartbeat(client: AgentApiClient): void {
     const beat = (): void => {
-      client.heartbeat(this._version, process.platform)
+      client.heartbeat(this._version, process.platform, undefined, this.nextRunAt)
         .then((res) => {
           // Act on server-side command (one-shot, already cleared server-side)
           if (res.command === "scrape_now" && !this._running) {
@@ -90,7 +110,7 @@ export class Scheduler {
             console.log("[agent] Scheduler paused by server");
           } else if (res.paused === false && this._paused) {
             console.log("[agent] Scheduler resumed by server");
-            void this.resume(client);
+            this.resume(client);
           }
         })
         .catch((err: unknown) => {
@@ -202,7 +222,7 @@ export class Scheduler {
         );
       } catch (err) {
         console.error(`[agent] Failed to scrape/push ${moduleName}:`, err);
-        client.heartbeat(this._version, process.platform, String(err)).catch(() => {});
+        client.heartbeat(this._version, process.platform, String(err), this.nextRunAt).catch(() => {});
       }
     }
 
