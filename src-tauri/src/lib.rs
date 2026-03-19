@@ -133,14 +133,26 @@ fn check_for_update(current_version: &str) -> Option<String> {
 // Update dialogs — PowerShell MessageBox (no extra dependencies, Windows-only)
 // ---------------------------------------------------------------------------
 
+/// DPI-awareness bootstrap prepended to every dialog script.
+///
+/// Each dialog runs in a fresh powershell.exe process which is not DPI-aware
+/// by default, causing blurry rendering on high-DPI / scaled displays.
+/// Calling SetProcessDPIAware() before showing any WinForms control fixes it.
+const DPI_PREFIX: &str = concat!(
+    "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] ",
+    "public static extern bool SetProcessDPIAware();' ",
+    "-Name DpiHelper -Namespace Win32 -PassThru | Out-Null; ",
+    "[Win32.DpiHelper]::SetProcessDPIAware() | Out-Null; ",
+    "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; ",
+);
+
 /// Show a Yes/No dialog. Returns true if the user clicked Yes.
 fn dialog_yes_no(title: &str, message: &str) -> bool {
     // Escape single quotes for PowerShell string literals
     let msg   = message.replace('\'', "''");
     let title = title.replace('\'', "''");
     let script = format!(
-        "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; \
-         [System.Windows.Forms.MessageBox]::Show('{msg}', '{title}', \
+        "{DPI_PREFIX}[System.Windows.Forms.MessageBox]::Show('{msg}', '{title}', \
          'YesNo', 'Question') -eq 'Yes'"
     );
     std::process::Command::new("powershell")
@@ -155,8 +167,7 @@ fn dialog_ok(title: &str, message: &str) {
     let msg   = message.replace('\'', "''");
     let title = title.replace('\'', "''");
     let script = format!(
-        "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; \
-         [System.Windows.Forms.MessageBox]::Show('{msg}', '{title}', \
+        "{DPI_PREFIX}[System.Windows.Forms.MessageBox]::Show('{msg}', '{title}', \
          'OK', 'Information') | Out-Null"
     );
     let _ = std::process::Command::new("powershell")
