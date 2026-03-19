@@ -4,6 +4,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+/// Prevents a console window from flashing when spawning PowerShell subprocesses.
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use tauri::{
     AppHandle, Manager, Runtime,
@@ -157,6 +163,7 @@ fn dialog_yes_no(title: &str, message: &str) -> bool {
     );
     std::process::Command::new("powershell")
         .args(["-WindowStyle", "Hidden", "-NonInteractive", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "True")
         .unwrap_or(false)
@@ -172,6 +179,7 @@ fn dialog_ok(title: &str, message: &str) {
     );
     let _ = std::process::Command::new("powershell")
         .args(["-WindowStyle", "Hidden", "-NonInteractive", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
 }
 
