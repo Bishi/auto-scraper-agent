@@ -687,7 +687,7 @@
         updateBadge.style.opacity = "0.5";
         updateBadge.style.pointerEvents = "none";
         try {
-          await invoke("install_update", { tag: availableTag });
+          await invoke("install_update");
         } catch { /* ignore — Rust side handles errors */ }
       });
 

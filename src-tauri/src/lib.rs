@@ -86,13 +86,28 @@ fn get_update_version() -> Option<String> {
     AVAILABLE_UPDATE.lock().ok().and_then(|g| g.clone())
 }
 
-/// Triggers the download + install flow for the given version tag.
+/// Triggers the download + install flow. Re-checks GitHub at click time to always
+/// get the absolute latest release (not the cached badge version).
 /// Called from the renderer when the user clicks the update badge.
 #[tauri::command]
-fn install_update(app: AppHandle, tag: String) {
+fn install_update(app: AppHandle) {
     if !UPDATE_IN_PROGRESS.swap(true, Ordering::SeqCst) {
+        let current_version = app.package_info().version.to_string();
         thread::spawn(move || {
-            handle_update_available(&app, &tag);
+            match check_for_update(&current_version) {
+                Some(latest_tag) => {
+                    if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
+                        *guard = Some(latest_tag.clone());
+                    }
+                    handle_update_available(&app, &latest_tag);
+                }
+                None => {
+                    // Already on latest — clear badge
+                    if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
+                        *guard = None;
+                    }
+                }
+            }
             UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
         });
     }
