@@ -182,11 +182,31 @@ const server = http.createServer((req, res) => {
           resolvedKey = existing.apiKey;
         }
 
+        const previous = readConfig();
         writeConfig({ apiKey: resolvedKey, serverUrl });
         client = new AgentApiClient(serverUrl, resolvedKey);
         scheduler.stop();
         scheduler.start(client, AGENT_VERSION);
-        console.log(`[agent] Configured: serverUrl=${serverUrl}`);
+
+        const keyTail =
+          resolvedKey.length >= 4 ? resolvedKey.slice(-4) : "????";
+        if (!previous) {
+          console.log(
+            `[agent] Config saved (first run): serverUrl=${serverUrl}, apiKey tail ...${keyTail}`,
+          );
+        } else {
+          const urlChanged = previous.serverUrl !== serverUrl;
+          const keyChanged = previous.apiKey !== resolvedKey;
+          console.log(
+            `[agent] Config saved: serverUrl=${serverUrl}` +
+              (urlChanged
+                ? ` (URL changed from ${previous.serverUrl})`
+                : " (URL unchanged)") +
+              (keyChanged
+                ? `, apiKey updated (tail ...${keyTail})`
+                : `, apiKey unchanged (tail ...${keyTail})`),
+          );
+        }
         return sendJson(res, 200, { ok: true });
       }
 
