@@ -654,7 +654,8 @@ pub fn run() {
             });
 
             // Background thread: silently check for updates on startup (after 15 s delay)
-            // then every 6 h. Stores the latest tag in AVAILABLE_UPDATE so the renderer
+            // then every 10 min (TEMP — TODO: change back to 6 h before next release).
+            // Stores the latest tag in AVAILABLE_UPDATE so the renderer
             // can show a non-intrusive badge. No dialog is shown automatically.
             let current_version = app.package_info().version.to_string();
             thread::spawn(move || {
@@ -668,7 +669,7 @@ pub fn run() {
                     } else if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
                         *guard = None; // clear stale entry if somehow rolled back
                     }
-                    thread::sleep(Duration::from_secs(6 * 60 * 60));
+                    thread::sleep(Duration::from_secs(10 * 60)); // TODO: restore to 6 * 60 * 60 after testing
                 }
             });
 
