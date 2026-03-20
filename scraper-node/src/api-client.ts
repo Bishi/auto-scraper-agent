@@ -22,6 +22,18 @@ export interface PushResultsResponse {
   summary: DiffSummary;
 }
 
+export interface HeartbeatResponse {
+  ok: boolean;
+  command?: string | null;
+  commandId?: string | null;
+  /**
+   * Echo of DB `paused` after the server applies `schedulerPaused` — redundant with what the agent
+   * already sent. Kept for backward compatibility and secondary sanity checks.
+   * @deprecated Prefer local scheduler state (`schedulerPaused` / `isPaused`); may be removed in a future release.
+   */
+  paused?: boolean;
+}
+
 export class AgentApiClient {
   constructor(
     private readonly serverUrl: string,
@@ -60,18 +72,29 @@ export class AgentApiClient {
     });
   }
 
+  /**
+   * Heartbeat: reports `schedulerPaused` (authoritative for server DB `paused`).
+   * Send `ackCommandId` once after applying a pause/resume command so the server can clear pending state.
+   */
   async heartbeat(
     version: string,
     platform: string,
-    failureMsg?: string,
-  ): Promise<{ ok: boolean; command?: string | null; paused?: boolean }> {
-    return this.request<{ ok: boolean; command?: string | null; paused?: boolean }>("/api/agent/heartbeat", {
+    opts?: {
+      failureMsg?: string;
+      schedulerPaused: boolean;
+      ackCommandId?: string;
+    },
+  ): Promise<HeartbeatResponse> {
+    const body: Record<string, unknown> = {
+      version,
+      platform,
+      schedulerPaused: opts?.schedulerPaused ?? false,
+    };
+    if (opts?.failureMsg) body.failureMsg = opts.failureMsg;
+    if (opts?.ackCommandId) body.ackCommandId = opts.ackCommandId;
+    return this.request<HeartbeatResponse>("/api/agent/heartbeat", {
       method: "POST",
-      body: JSON.stringify({
-        version,
-        platform,
-        ...(failureMsg ? { failureMsg } : {}),
-      }),
+      body: JSON.stringify(body),
     });
   }
 }

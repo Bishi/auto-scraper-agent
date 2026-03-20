@@ -67,3 +67,34 @@ describe("Scheduler — triggerNow()", () => {
     expect(client.getSchedule).toHaveBeenCalledOnce();
   });
 });
+
+describe("Scheduler — heartbeat pause/resume", () => {
+  it("applies pause when server returns pause + commandId", async () => {
+    const client = mockClient();
+    (client.getSchedule as ReturnType<typeof vi.fn>).mockResolvedValue({
+      intervalMs: 30 * 60 * 1000,
+      jobs: [],
+    });
+    (client.getConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ modules: {} });
+    const hb = vi.fn().mockResolvedValue({
+      ok: true,
+      command: "pause",
+      commandId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      paused: false,
+    });
+    (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+
+    const s = new Scheduler();
+    s.start(client as AgentApiClient, "1.0.0");
+    await vi.waitFor(() => expect(s.isPaused).toBe(true));
+    expect(hb).toHaveBeenCalledWith(
+      "1.0.0",
+      expect.any(String),
+      expect.objectContaining({
+        schedulerPaused: false,
+      }),
+    );
+    s.stop();
+  });
+
+});
