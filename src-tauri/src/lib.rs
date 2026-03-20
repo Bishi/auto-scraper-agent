@@ -699,19 +699,16 @@ pub fn run() {
                         .and_then(|r| r.json::<UpdateCheckResponse>().ok())
                         .map(|r| r.pending)
                         .unwrap_or(false);
-                    if update_pending && !UPDATE_IN_PROGRESS.swap(true, Ordering::SeqCst) {
-                        let app_clone = tooltip_handle.clone();
+                    if update_pending {
+                        // Remote check_update from admin — silent: just set the badge,
+                        // do NOT show a dialog. User sees the amber pill and updates
+                        // when ready. Only tray "Check for Updates" / badge click shows a dialog.
                         let current_version = tooltip_handle.package_info().version.to_string();
-                        thread::spawn(move || {
-                            match check_for_update(&current_version) {
-                                Some(latest_tag) => handle_update_available(&app_clone, &latest_tag),
-                                None => dialog_ok(
-                                    "Up to Date",
-                                    &format!("Auto-Scraper Agent v{current_version} is the latest version."),
-                                ),
+                        if let Some(latest_tag) = check_for_update(&current_version) {
+                            if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
+                                *guard = Some(latest_tag);
                             }
-                            UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
-                        });
+                        }
                     }
 
                     let tooltip = client
