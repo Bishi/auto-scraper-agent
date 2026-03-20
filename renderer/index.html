@@ -265,6 +265,24 @@
       .log-msg         { word-break: break-all; white-space: pre-wrap; }
 
       .log-empty { color: #334155; font-style: italic; padding: 4px 0; }
+
+      /* ── Update badge ────────────────────────────────── */
+      .update-badge {
+        display: none;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        font-weight: 500;
+        color: #fbbf24;
+        background: #1c1408;
+        border: 1px solid #78350f;
+        padding: 2px 8px;
+        border-radius: 10px;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.15s;
+      }
+      .update-badge:hover { background: #292008; }
     </style>
   </head>
   <body>
@@ -274,6 +292,7 @@
       <div class="status-dot" id="dot"></div>
       <span class="status-text" id="status-text">checking…</span>
       <span class="schedule-text" id="schedule-text"></span>
+      <button class="update-badge" id="update-badge" title="Click to install update">↑ <span id="update-version"></span></button>
       <button class="pause" id="pause-btn" style="margin-left:auto">⏸ Pause schedule</button>
     </div>
 
@@ -644,6 +663,36 @@
           clearProfileBtn.textContent = "🗑 Clear Browser Profile";
         }
       });
+
+      // ── Update badge ────────────────────────────────────────────────────────
+      const updateBadge   = document.getElementById("update-badge");
+      const updateVersion = document.getElementById("update-version");
+      let availableTag    = null;
+
+      async function pollUpdateVersion() {
+        try {
+          const tag = await invoke("get_update_version");
+          availableTag = tag ?? null;
+          if (availableTag) {
+            updateVersion.textContent = availableTag;
+            updateBadge.style.display = "flex";
+          } else {
+            updateBadge.style.display = "none";
+          }
+        } catch { /* ignore */ }
+      }
+
+      updateBadge.addEventListener("click", async () => {
+        if (!availableTag) return;
+        updateBadge.style.opacity = "0.5";
+        updateBadge.style.pointerEvents = "none";
+        try {
+          await invoke("install_update", { tag: availableTag });
+        } catch { /* ignore — Rust side handles errors */ }
+      });
+
+      pollUpdateVersion();
+      setInterval(pollUpdateVersion, 5 * 60 * 1000); // re-check every 5 min
 
       // ── Run Scrape (Settings tab) ───────────────────────────────────────────
       const runScrapeSettingsBtn = document.getElementById("run-scrape-settings-btn");

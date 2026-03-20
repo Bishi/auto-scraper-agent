@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 #[cfg(target_os = "windows")]
@@ -25,6 +26,8 @@ use tauri::menu::PredefinedMenuItem;
 
 // Prevents two concurrent update flows (startup check + manual "Check for Updates" click).
 static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+// Latest available version tag found by background check, shown non-intrusively in the UI.
+static AVAILABLE_UPDATE: Mutex<Option<String>> = Mutex::new(None);
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -74,6 +77,25 @@ fn save_config(
          Make sure the sidecar is running (in dev mode: cd scraper-node && npm run dev).\n\n\
          Detail: {last_err}"
     ))
+}
+
+/// Returns the latest available version tag found by the background update check,
+/// or null if no update is available. Called from the renderer to show the update badge.
+#[tauri::command]
+fn get_update_version() -> Option<String> {
+    AVAILABLE_UPDATE.lock().ok().and_then(|g| g.clone())
+}
+
+/// Triggers the download + install flow for the given version tag.
+/// Called from the renderer when the user clicks the update badge.
+#[tauri::command]
+fn install_update(app: AppHandle, tag: String) {
+    if !UPDATE_IN_PROGRESS.swap(true, Ordering::SeqCst) {
+        thread::spawn(move || {
+            handle_update_available(&app, &tag);
+            UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -453,10 +475,16 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
             thread::spawn(move || {
                 match check_for_update(&current_version) {
                     Some(latest_tag) => {
+                        if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
+                            *guard = Some(latest_tag.clone());
+                        }
                         handle_update_available(&app_clone, &latest_tag);
                     }
                     None => {
                         eprintln!("[agent] App is up to date");
+                        if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
+                            *guard = None;
+                        }
                         dialog_ok(
                             "Up to Date",
                             &format!("Auto-Scraper Agent v{current_version} is the latest version."),
@@ -489,7 +517,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![save_config])
+        .invoke_handler(tauri::generate_handler![save_config, get_update_version, install_update])
         .setup(|app| {
             // Clean up any leftover installer files from a previous auto-update.
             // The update flow launches the installer and immediately exits, so the
@@ -606,17 +634,22 @@ pub fn run() {
                 }
             });
 
-            // Background thread: check GitHub releases for a newer version on startup
-            // (after a 15 s delay so it doesn't slow first launch).
-            // If an update is found, show a dialog so the user can download + install.
-            // Only runs once per session — we break after showing the dialog.
-            let update_check_handle = app.handle().clone();
+            // Background thread: silently check for updates on startup (after 15 s delay)
+            // then every 6 h. Stores the latest tag in AVAILABLE_UPDATE so the renderer
+            // can show a non-intrusive badge. No dialog is shown automatically.
             let current_version = app.package_info().version.to_string();
             thread::spawn(move || {
                 thread::sleep(Duration::from_secs(15));
-                if let Some(latest_tag) = check_for_update(&current_version) {
-                    eprintln!("[agent] Update available: {}", latest_tag);
-                    handle_update_available(&update_check_handle, &latest_tag);
+                loop {
+                    if let Some(latest_tag) = check_for_update(&current_version) {
+                        eprintln!("[agent] Update available: {}", latest_tag);
+                        if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
+                            *guard = Some(latest_tag);
+                        }
+                    } else if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
+                        *guard = None; // clear stale entry if somehow rolled back
+                    }
+                    thread::sleep(Duration::from_secs(6 * 60 * 60));
                 }
             });
 

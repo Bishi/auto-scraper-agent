@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.5.0";
+const AGENT_VERSION = "0.5.1";
 
 // ---------------------------------------------------------------------------
 // Log buffer — persisted to ~/.auto-scraper/agent.log (NDJSON) so history
