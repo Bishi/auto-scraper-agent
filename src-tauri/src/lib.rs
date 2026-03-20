@@ -535,20 +535,24 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![save_config, get_update_version, install_update])
         .setup(|app| {
             // Clean up any leftover installer files from a previous auto-update.
-            // The update flow launches the installer and immediately exits, so the
-            // temp file is never deleted by the old process.  Do it here instead.
-            let temp = std::env::temp_dir();
-            if let Ok(entries) = std::fs::read_dir(&temp) {
-                for entry in entries.flatten() {
-                    let name = entry.file_name();
-                    let name = name.to_string_lossy();
-                    if name.starts_with("auto-scraper-agent-") && name.ends_with("-setup.exe") {
-                        if std::fs::remove_file(entry.path()).is_ok() {
-                            eprintln!("[agent] Cleaned up old installer: {}", entry.path().display());
+            // Done in a background thread with a delay: NSIS may still be alive
+            // (showing the Finish page) when the new agent starts, keeping the
+            // file locked. 30 s is enough for the user to click Finish.
+            thread::spawn(|| {
+                thread::sleep(Duration::from_secs(30));
+                let temp = std::env::temp_dir();
+                if let Ok(entries) = std::fs::read_dir(&temp) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name();
+                        let name = name.to_string_lossy();
+                        if name.starts_with("auto-scraper-agent-") && name.ends_with("-setup.exe") {
+                            if std::fs::remove_file(entry.path()).is_ok() {
+                                eprintln!("[agent] Cleaned up old installer: {}", entry.path().display());
+                            }
                         }
                     }
                 }
-            }
+            });
 
             // Spawn the Node.js sidecar.
             let sidecar_cmd = app
