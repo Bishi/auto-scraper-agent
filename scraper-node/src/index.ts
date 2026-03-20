@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.5.11";
+const AGENT_VERSION = "0.5.12";
 
 // ---------------------------------------------------------------------------
 // Log buffer — persisted to ~/.auto-scraper/agent.log (NDJSON) so history
@@ -140,7 +140,7 @@ const server = http.createServer((req, res) => {
 
       if (method === "POST" && pathname === "/log") {
         const body = await readBody(req);
-        const parsed = JSON.parse(body) as { level?: string; msg?: string };
+        const parsed = JSON.parse(String(body)) as { level?: string; msg?: string };
         const level = parsed.level === "error" ? "error" : "info";
         const msg = typeof parsed.msg === "string" ? parsed.msg : String(parsed.msg ?? "");
         if (level === "error") console.error(msg);
