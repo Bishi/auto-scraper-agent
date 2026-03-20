@@ -699,7 +699,7 @@
       });
 
       pollUpdateVersion();
-      setInterval(pollUpdateVersion, 15 * 1000); // re-check every 15 s (Tauri command reads a mutex — essentially free)
+      setInterval(pollUpdateVersion, 5 * 60 * 1000); // re-check every 5 min (default; was 15 s for dev testing)
 
       // ── Run Scrape (Settings tab) ───────────────────────────────────────────
       const runScrapeSettingsBtn = document.getElementById("run-scrape-settings-btn");
