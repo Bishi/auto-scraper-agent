@@ -688,7 +688,11 @@
         updateBadge.style.pointerEvents = "none";
         try {
           await invoke("install_update");
-        } catch { /* ignore — Rust side handles errors */ }
+        } catch { /* ignore — Rust side handles errors */ } finally {
+          // Restore button whether user clicked Yes, No, or dialog was dismissed.
+          updateBadge.style.opacity = "";
+          updateBadge.style.pointerEvents = "";
+        }
       });
 
       pollUpdateVersion();
