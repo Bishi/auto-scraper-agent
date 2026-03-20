@@ -159,6 +159,16 @@ struct GitHubRelease {
     tag_name: String,
 }
 
+/// Post a log message to the sidecar's /log endpoint so it appears in the agent UI.
+fn sidecar_log(client: &reqwest::blocking::Client, level: &str, msg: &str) {
+    let body = format!(r#"{{"level":"{}","msg":"{}"}}"#, level, msg.replace('"', "\\\""));
+    let _ = client
+        .post("http://127.0.0.1:9001/log")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send();
+}
+
 /// Check GitHub releases API for a newer version.
 /// Returns Some(tag_name) like "v0.4.0" if an update is available, None otherwise.
 fn check_for_update(current_version: &str) -> Option<String> {
@@ -663,15 +673,24 @@ pub fn run() {
             // can show a non-intrusive badge. No dialog is shown automatically.
             let current_version = app.package_info().version.to_string();
             thread::spawn(move || {
+                let log_client = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(3))
+                    .build()
+                    .ok();
                 thread::sleep(Duration::from_secs(15));
                 loop {
                     if let Some(latest_tag) = check_for_update(&current_version) {
                         eprintln!("[agent] Update available: {}", latest_tag);
                         if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
-                            *guard = Some(latest_tag);
+                            *guard = Some(latest_tag.clone());
                         }
-                    } else if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
-                        *guard = None; // clear stale entry if somehow rolled back
+                        if let Some(ref c) = log_client {
+                            sidecar_log(c, "info", &format!("[agent] Update available: {} — click the badge to install", latest_tag));
+                        }
+                    } else {
+                        if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
+                            *guard = None; // clear stale entry if somehow rolled back
+                        }
                     }
                     thread::sleep(Duration::from_secs(10 * 60)); // TODO: restore to 6 * 60 * 60 after testing
                 }
@@ -706,8 +725,11 @@ pub fn run() {
                         let current_version = tooltip_handle.package_info().version.to_string();
                         if let Some(latest_tag) = check_for_update(&current_version) {
                             if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
-                                *guard = Some(latest_tag);
+                                *guard = Some(latest_tag.clone());
                             }
+                            sidecar_log(&client, "info", &format!("[agent] Update available: {} — click the badge to install", latest_tag));
+                        } else {
+                            sidecar_log(&client, "info", "[agent] Update check: already on latest version");
                         }
                     }
 
