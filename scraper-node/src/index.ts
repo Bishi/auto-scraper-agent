@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.5.13";
+const AGENT_VERSION = "0.5.14";
 
 // ---------------------------------------------------------------------------
 // Log buffer — persisted to ~/.auto-scraper/agent.log (NDJSON) so history
@@ -195,12 +195,14 @@ const server = http.createServer((req, res) => {
         if (!client) {
           return sendJson(res, 400, { error: "Not configured. POST /config first." });
         }
+        console.log("[agent] Scrape triggered by user");
         void scheduler.triggerNow(client);
         return sendJson(res, 200, { ok: true, message: "Scrape triggered" });
       }
 
       if (method === "POST" && pathname === "/scrape/stop") {
         const wasRunning = scheduler.isRunning;
+        console.log(wasRunning ? "[agent] Scrape stopped by user" : "[agent] Stop requested — no scrape in progress");
         scheduler.stopScrape();
         return sendJson(res, 200, {
           ok: true,

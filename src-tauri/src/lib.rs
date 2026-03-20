@@ -100,6 +100,7 @@ fn install_update(app: AppHandle) {
 
     let current_version = app.package_info().version.to_string();
     thread::spawn(move || {
+        sidecar_log_quick("info", "[agent] Update install initiated by user");
         match check_for_update(&current_version) {
             Some(latest_tag) => {
                 if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
@@ -112,6 +113,7 @@ fn install_update(app: AppHandle) {
                 if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
                     *guard = None;
                 }
+                sidecar_log_quick("info", "[agent] Update check: already on latest version");
             }
         }
     });
@@ -167,6 +169,16 @@ fn sidecar_log(client: &reqwest::blocking::Client, level: &str, msg: &str) {
         .header("Content-Type", "application/json")
         .body(body)
         .send();
+}
+
+/// One-shot sidecar log — creates its own client, use when no client is available.
+fn sidecar_log_quick(level: &str, msg: &str) {
+    if let Ok(client) = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+    {
+        sidecar_log(&client, level, msg);
+    }
 }
 
 /// Check GitHub releases API for a newer version.
@@ -369,12 +381,16 @@ fn handle_update_available(app: &AppHandle, latest_tag: &str) {
     if !want_download {
         UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
         set_tray_tooltip(app, &format!("Auto-Scraper Agent — Update available: v{version}"));
+        sidecar_log_quick("info", &format!("[agent] Update v{version} postponed by user"));
         return;
     }
+
+    sidecar_log_quick("info", &format!("[agent] Downloading update v{version}…"));
 
     match download_installer(latest_tag, app) {
         Ok(installer_path) => {
             set_tray_tooltip(app, "Auto-Scraper Agent — Update ready");
+            sidecar_log_quick("info", &format!("[agent] Update v{version} downloaded — prompting to install"));
 
             let want_install = dialog_yes_no(
                 "Update Ready",
@@ -385,6 +401,7 @@ fn handle_update_available(app: &AppHandle, latest_tag: &str) {
             );
 
             if want_install {
+                sidecar_log_quick("info", &format!("[agent] Installing update v{version} — agent will restart"));
                 eprintln!("[agent] Launching installer: {}", installer_path.display());
                 // Use PowerShell Start-Process (→ ShellExecuteW) instead of
                 // Command::new (→ CreateProcess) so Windows handles UAC elevation
@@ -401,10 +418,12 @@ fn handle_update_available(app: &AppHandle, latest_tag: &str) {
                 // trigger installation again from the tray menu.
                 UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
                 set_tray_tooltip(app, "Auto-Scraper Agent — Update ready (not yet installed)");
+                sidecar_log_quick("info", &format!("[agent] Update v{version} installation postponed by user"));
             }
         }
         Err(e) => {
             eprintln!("[agent] Download failed: {e}");
+            sidecar_log_quick("error", &format!("[agent] Update download failed: {e}"));
             UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
             set_tray_tooltip(app, "Auto-Scraper Agent");
             dialog_ok("Download Failed", &format!("Could not download the update:\n\n{e}"));
@@ -502,6 +521,7 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
             let app_clone = app.clone();
             let current_version = app.package_info().version.to_string();
             thread::spawn(move || {
+                sidecar_log_quick("info", "[agent] Checking for updates…");
                 match check_for_update(&current_version) {
                     Some(latest_tag) => {
                         if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
@@ -511,6 +531,7 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
                     }
                     None => {
                         eprintln!("[agent] App is up to date");
+                        sidecar_log_quick("info", "[agent] Update check: already on latest version");
                         if let Ok(mut guard) = AVAILABLE_UPDATE.lock() {
                             *guard = None;
                         }
