@@ -354,6 +354,39 @@ fn download_installer(tag: &str, app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dest)
 }
 
+
+/// Launch the NSIS installer so its window is more likely to appear in the foreground on Windows.
+/// Uses `cmd /c start` (ShellExecute) first; falls back to PowerShell `Start-Process -WindowStyle Normal`.
+#[cfg(target_os = "windows")]
+fn launch_installer_in_foreground(installer_path: &std::path::Path) -> std::io::Result<()> {
+    let path_str = installer_path.as_os_str().to_string_lossy();
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.args(["/C", "start", "", path_str.as_ref()])
+        .creation_flags(CREATE_NO_WINDOW);
+    if cmd.spawn().is_ok() {
+        return Ok(());
+    }
+    let escaped = installer_path.to_string_lossy().replace('\'', "''");
+    std::process::Command::new("powershell")
+        .args([
+            "-WindowStyle",
+            "Hidden",
+            "-NonInteractive",
+            "-Command",
+            &format!("Start-Process -FilePath '{escaped}' -WindowStyle Normal"),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn launch_installer_in_foreground(installer_path: &std::path::Path) -> std::io::Result<()> {
+    std::process::Command::new(installer_path).spawn()?;
+    Ok(())
+}
+
+
 // ---------------------------------------------------------------------------
 // Full update flow: dialog → download → install dialog → launch → exit
 // ---------------------------------------------------------------------------
@@ -403,16 +436,21 @@ fn handle_update_available(app: &AppHandle, latest_tag: &str) {
             if want_install {
                 sidecar_log_quick("info", &format!("[agent] Installing update v{version} — agent will restart"));
                 eprintln!("[agent] Launching installer: {}", installer_path.display());
-                // Use PowerShell Start-Process (→ ShellExecuteW) instead of
-                // Command::new (→ CreateProcess) so Windows handles UAC elevation
-                // for the installer's requireAdministrator manifest entry.
-                let escaped = installer_path.to_string_lossy().replace('\'', "''");
-                let _ = std::process::Command::new("powershell")
-                    .args(["-WindowStyle", "Hidden", "-NonInteractive", "-Command",
-                           &format!("Start-Process -FilePath '{escaped}'")])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .spawn();
-                app.exit(0);
+                if let Err(e) = launch_installer_in_foreground(&installer_path) {
+                    eprintln!("[agent] Could not launch installer: {e}");
+                    UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
+                    dialog_ok(
+                        "Install Failed",
+                        &format!(
+                            "Could not start the installer.\n\nTry running manually:\n{}",
+                            installer_path.display()
+                        ),
+                    );
+                } else {
+                    // Brief pause so Windows can foreground the new process before we exit.
+                    thread::sleep(Duration::from_millis(600));
+                    app.exit(0);
+                }
             } else {
                 // Keep the file for next time; reset the flag so the user can
                 // trigger installation again from the tray menu.
