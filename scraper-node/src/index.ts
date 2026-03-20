@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.4.20";
+const AGENT_VERSION = "0.5.0";
 
 // ---------------------------------------------------------------------------
 // Log buffer — persisted to ~/.auto-scraper/agent.log (NDJSON) so history
@@ -132,6 +132,10 @@ const server = http.createServer((req, res) => {
 
       if (method === "GET" && pathname === "/schedule") {
         return sendJson(res, 200, { nextRunAt: scheduler.nextRunAt, paused: scheduler.isPaused, running: scheduler.isRunning });
+      }
+
+      if (method === "GET" && pathname === "/update/check") {
+        return sendJson(res, 200, { pending: scheduler.consumeUpdateCheck() });
       }
 
       if (method === "POST" && pathname === "/scheduler/pause") {

@@ -13,6 +13,8 @@ export class Scheduler {
   private _paused = false;
   private _stopRequested = false;
   private _version = "";
+  /** Set when the server sends a check_update command; read+cleared by GET /update/check. */
+  private _pendingUpdateCheck = false;
   /**
    * Remaining ms that were left on the timer when pause() was called.
    * Used by resume() to restore the countdown rather than scraping immediately.
@@ -22,6 +24,12 @@ export class Scheduler {
   get isRunning(): boolean { return this._running; }
   /** True when the scheduler is paused (heartbeat continues but scrapes are suspended). */
   get isPaused(): boolean { return this._paused; }
+  /** Returns true (and clears the flag) if the server requested an update check. */
+  consumeUpdateCheck(): boolean {
+    const pending = this._pendingUpdateCheck;
+    this._pendingUpdateCheck = false;
+    return pending;
+  }
   /** Epoch ms of the next scheduled scrape, or null if not yet scheduled / currently running. */
   nextRunAt: number | null = null;
 
@@ -103,6 +111,10 @@ export class Scheduler {
           }
           if (res.command === "stop_scrape") {
             this.stopScrape();
+          }
+          if (res.command === "check_update") {
+            console.log("[agent] Server command: check_update");
+            this._pendingUpdateCheck = true;
           }
           // Sync pause state from server
           if (res.paused === true && !this._paused) {

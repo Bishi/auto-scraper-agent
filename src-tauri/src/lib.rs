@@ -109,6 +109,11 @@ struct ScheduleResponse {
 }
 
 #[derive(Deserialize)]
+struct UpdateCheckResponse {
+    pending: bool,
+}
+
+#[derive(Deserialize)]
 struct GitHubRelease {
     tag_name: String,
 }
@@ -628,6 +633,30 @@ pub fn run() {
                 };
                 loop {
                     thread::sleep(Duration::from_secs(30));
+
+                    // Check if the server sent a check_update command to this agent.
+                    let update_pending = client
+                        .get("http://127.0.0.1:9001/update/check")
+                        .send()
+                        .ok()
+                        .and_then(|r| r.json::<UpdateCheckResponse>().ok())
+                        .map(|r| r.pending)
+                        .unwrap_or(false);
+                    if update_pending && !UPDATE_IN_PROGRESS.swap(true, Ordering::SeqCst) {
+                        let app_clone = tooltip_handle.clone();
+                        let current_version = tooltip_handle.package_info().version.to_string();
+                        thread::spawn(move || {
+                            match check_for_update(&current_version) {
+                                Some(latest_tag) => handle_update_available(&app_clone, &latest_tag),
+                                None => dialog_ok(
+                                    "Up to Date",
+                                    &format!("Auto-Scraper Agent v{current_version} is the latest version."),
+                                ),
+                            }
+                            UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
+                        });
+                    }
+
                     let tooltip = client
                         .get("http://127.0.0.1:9001/schedule")
                         .send()
