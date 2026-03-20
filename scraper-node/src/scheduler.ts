@@ -111,27 +111,31 @@ export class Scheduler {
           ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
         })
         .then((res) => {
-          // Drop ack target once the server stops returning the same pause/resume + id (ack processed).
+          // Drop local ack target once the server clears pending (same commandId no longer returned).
           if (this._pendingAckCommandId) {
-            const stillPending =
-              (res.command === "pause" || res.command === "resume") &&
-              res.commandId === this._pendingAckCommandId;
+            const stillPending = res.commandId === this._pendingAckCommandId;
             if (!stillPending) {
               this._pendingAckCommandId = null;
             }
           }
 
-          // One-shot commands (cleared server-side when delivered)
-          if (res.command === "scrape_now" && !this._running) {
-            console.log("[agent] Server command: scrape_now");
-            void this.triggerNow(client, "server");
+          // scrape_now / stop_scrape / check_update — ack only after we apply locally (same id as pause/resume).
+          if (res.command === "scrape_now" && res.commandId) {
+            if (!this._running) {
+              console.log("[agent] Server command: scrape_now");
+              void this.triggerNow(client, "server");
+              this._pendingAckCommandId = res.commandId;
+            }
+            // If already running, do not ack — server keeps pending until next heartbeat.
           }
-          if (res.command === "stop_scrape") {
+          if (res.command === "stop_scrape" && res.commandId) {
             this.stopScrape();
+            this._pendingAckCommandId = res.commandId;
           }
-          if (res.command === "check_update") {
+          if (res.command === "check_update" && res.commandId) {
             console.log("[agent] Server command: check_update");
             this._pendingUpdateCheck = true;
+            this._pendingAckCommandId = res.commandId;
           }
 
           // Pause/resume with command id + ack — only set ack after local state applies successfully

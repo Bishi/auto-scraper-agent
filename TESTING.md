@@ -163,4 +163,6 @@ Tagged `latest`, marked pre-release. Use for testing unreleased builds.
 4. Dashboard shows the new scrape run with listings
 5. Tray tooltip shows next scrape time (updates after each completed run)
 6. Pause/Resume from the server dashboard propagates within one heartbeat (~60 s); resuming does **not** trigger an immediate scrape — the countdown is restored
-7. "Check for Updates" in tray shows "up to date" dialog when on latest version
+7. **Trigger scrape** / **Stop scrape** (dashboard or server `/agent` page): server keeps the command until the sidecar heartbeats **`ackCommandId`** after applying (if a scrape is already running, `scrape_now` stays queued until the scheduler can start — not lost on first heartbeat)
+8. Admin **Check for Updates** (fleet): same ack path as other commands — agent logs `Server command: check_update` and sets the update-check flag
+9. "Check for Updates" in tray shows "up to date" dialog when on latest version
