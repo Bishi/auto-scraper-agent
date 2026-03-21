@@ -127,16 +127,16 @@ Download from the Releases page and run the installer.
 
 ### Specific version (stable)
 ```
-https://github.com/Bishi/auto-scraper-agent/releases/download/v{version}/Auto-Scraper-Agent_{version}_x64-setup.exe
+https://github.com/Bishi/auto-scraper-agent/releases/download/v{version}/Auto-Scraper.Agent_{version}_x64-setup.exe
 ```
 Example:
 ```
-https://github.com/Bishi/auto-scraper-agent/releases/download/v0.3.5/Auto-Scraper-Agent_0.3.5_x64-setup.exe
+https://github.com/Bishi/auto-scraper-agent/releases/download/v0.5.27/Auto-Scraper.Agent_0.5.27_x64-setup.exe
 ```
 
 ### Always-latest stable (GitHub redirect)
 ```
-https://github.com/Bishi/auto-scraper-agent/releases/latest/download/Auto-Scraper-Agent_{version}_x64-setup.exe
+https://github.com/Bishi/auto-scraper-agent/releases/latest/download/Auto-Scraper.Agent_{version}_x64-setup.exe
 ```
 ⚠️ The filename still contains the version number, so this URL changes with every release.
 Use the GitHub API for a truly static download URL:
@@ -151,7 +151,7 @@ running `AGENT_VERSION` to know if an update is available.
 
 ### Rolling pre-release (manual `workflow_dispatch` build)
 ```
-https://github.com/Bishi/auto-scraper-agent/releases/download/latest/Auto-Scraper-Agent_{version}_x64-setup.exe
+https://github.com/Bishi/auto-scraper-agent/releases/download/latest/Auto-Scraper.Agent_{version}_x64-setup.exe
 ```
 Tagged `latest`, marked pre-release. Use for testing unreleased builds.
 
