@@ -10,7 +10,7 @@ import { Scheduler } from "./scheduler.js";
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.5.24";
+const AGENT_VERSION = "0.5.26";
 
 // ---------------------------------------------------------------------------
 // Log buffer — persisted to ~/.auto-scraper/agent.log (NDJSON) so history
@@ -182,11 +182,31 @@ const server = http.createServer((req, res) => {
           resolvedKey = existing.apiKey;
         }
 
+        const previous = readConfig();
         writeConfig({ apiKey: resolvedKey, serverUrl });
         client = new AgentApiClient(serverUrl, resolvedKey);
         scheduler.stop();
         scheduler.start(client, AGENT_VERSION);
-        console.log(`[agent] Configured: serverUrl=${serverUrl}`);
+
+        const keyTail =
+          resolvedKey.length >= 4 ? resolvedKey.slice(-4) : "????";
+        if (!previous) {
+          console.log(
+            `[agent] Config saved (first run): serverUrl=${serverUrl}, apiKey tail ...${keyTail}`,
+          );
+        } else {
+          const urlChanged = previous.serverUrl !== serverUrl;
+          const keyChanged = previous.apiKey !== resolvedKey;
+          console.log(
+            `[agent] Config saved: serverUrl=${serverUrl}` +
+              (urlChanged
+                ? ` (URL changed from ${previous.serverUrl})`
+                : " (URL unchanged)") +
+              (keyChanged
+                ? `, apiKey updated (tail ...${keyTail})`
+                : `, apiKey unchanged (tail ...${keyTail})`),
+          );
+        }
         return sendJson(res, 200, { ok: true });
       }
 
@@ -210,9 +230,13 @@ const server = http.createServer((req, res) => {
       }
 
       if (method === "POST" && pathname === "/stop") {
+        console.log("[agent] Application shutdown requested (POST /stop)");
         scheduler.stop();
         sendJson(res, 200, { ok: true });
-        setTimeout(() => process.exit(0), 500);
+        setTimeout(() => {
+          console.log("[agent] Application process exiting");
+          process.exit(0);
+        }, 500);
         return;
       }
 
@@ -249,8 +273,21 @@ server.on("error", (err: NodeJS.ErrnoException) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
+  console.log(`[agent] Application process started (PID ${process.pid})`);
   console.log(`[agent] Auto-Scraper agent v${AGENT_VERSION} listening on http://127.0.0.1:${PORT}`);
 });
+
+function shutdownFromSignal(signal: string): void {
+  console.log(`[agent] Application shutdown requested (${signal})`);
+  scheduler.stop();
+  setTimeout(() => {
+    console.log("[agent] Application process exiting");
+    process.exit(0);
+  }, 300);
+}
+
+process.on("SIGINT", () => shutdownFromSignal("SIGINT"));
+process.on("SIGTERM", () => shutdownFromSignal("SIGTERM"));
 
 // Auto-start scheduler if already configured from a previous run
 const storedConfig = readConfig();

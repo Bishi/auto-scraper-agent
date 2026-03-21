@@ -20,6 +20,8 @@ export class Scheduler {
    * Used by resume() to restore the countdown rather than scraping immediately.
    */
   private _pausedRemainingMs: number | null = null;
+  /** Outstanding pause/resume command id to ack on the next heartbeat(s) until the server clears pending. */
+  private _pendingAckCommandId: string | null = null;
   /** True while a scrape cycle is actively executing. */
   get isRunning(): boolean { return this._running; }
   /** True when the scheduler is paused (heartbeat continues but scrapes are suspended). */
@@ -47,6 +49,7 @@ export class Scheduler {
     this.heartbeatTimer = null;
     this.nextRunAt = null;
     this._paused = false;
+    this._pendingAckCommandId = null;
   }
 
   /** Request an in-progress scrape to halt after the current module completes. */
@@ -102,27 +105,80 @@ export class Scheduler {
 
   private startHeartbeat(client: AgentApiClient): void {
     const beat = (): void => {
-      client.heartbeat(this._version, process.platform)
+      client
+        .heartbeat(this._version, process.platform, {
+          schedulerPaused: this._paused,
+          ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
+        })
         .then((res) => {
-          // Act on server-side command (one-shot, already cleared server-side)
-          if (res.command === "scrape_now" && !this._running) {
-            console.log("[agent] Server command: scrape_now");
-            void this.triggerNow(client, "server");
+          // Drop local ack target once the server clears pending (same commandId no longer returned).
+          if (this._pendingAckCommandId) {
+            const stillPending = res.commandId === this._pendingAckCommandId;
+            if (!stillPending) {
+              this._pendingAckCommandId = null;
+            }
           }
-          if (res.command === "stop_scrape") {
+
+          // scrape_now / stop_scrape / check_update — ack only after we apply locally (same id as pause/resume).
+          // Skip if _pendingAckCommandId already equals res.commandId — command was already applied,
+          // we're just waiting for the server to clear it. Prevents duplicate execution on echo.
+          if (res.command === "scrape_now" && res.commandId && res.commandId !== this._pendingAckCommandId) {
+            if (!this._running) {
+              console.log("[agent] Server command: scrape_now");
+              void this.triggerNow(client, "server");
+              this._pendingAckCommandId = res.commandId;
+            }
+            // If already running, do not ack — server keeps pending until next heartbeat.
+          }
+          if (res.command === "stop_scrape" && res.commandId && res.commandId !== this._pendingAckCommandId) {
             this.stopScrape();
+            this._pendingAckCommandId = res.commandId;
           }
-          if (res.command === "check_update") {
+          if (res.command === "check_update" && res.commandId && res.commandId !== this._pendingAckCommandId) {
             console.log("[agent] Server command: check_update");
             this._pendingUpdateCheck = true;
+            this._pendingAckCommandId = res.commandId;
           }
-          // Sync pause state from server
-          if (res.paused === true && !this._paused) {
-            this.pause();
-            console.log("[agent] Scheduler paused by server");
-          } else if (res.paused === false && this._paused) {
-            console.log("[agent] Scheduler resumed by server");
-            this.resume(client);
+
+          // Pause/resume with command id + ack — only set ack after local state applies successfully
+          // (so we never ack a command that threw before the scheduler reached the matching state).
+          if (res.command === "pause") {
+            try {
+              if (!this._paused) {
+                this.pause();
+                console.log("[agent] Server command: pause");
+              }
+              if (res.commandId) {
+                this._pendingAckCommandId = res.commandId;
+              }
+            } catch (err) {
+              console.error("[agent] Failed to apply pause command:", err);
+            }
+          }
+          if (res.command === "resume") {
+            try {
+              if (this._paused) {
+                console.log("[agent] Server command: resume");
+                this.resume(client);
+              }
+              if (res.commandId) {
+                this._pendingAckCommandId = res.commandId;
+              }
+            } catch (err) {
+              console.error("[agent] Failed to apply resume command:", err);
+            }
+          }
+
+          // Secondary sync from server echo — skip in the same tick as a pause/resume command,
+          // otherwise stale `res.paused` can undo a local pause before the next heartbeat sends schedulerPaused.
+          if (res.command !== "pause" && res.command !== "resume") {
+            if (res.paused === true && !this._paused) {
+              this.pause();
+              console.log("[agent] Scheduler paused (server echo)");
+            } else if (res.paused === false && this._paused) {
+              console.log("[agent] Scheduler resumed (server echo)");
+              this.resume(client);
+            }
           }
         })
         .catch((err: unknown) => {
@@ -234,7 +290,13 @@ export class Scheduler {
         );
       } catch (err) {
         console.error(`[agent] Failed to scrape/push ${moduleName}:`, err);
-        client.heartbeat(this._version, process.platform, String(err)).catch(() => {});
+        client
+          .heartbeat(this._version, process.platform, {
+            schedulerPaused: this._paused,
+            ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
+            failureMsg: String(err),
+          })
+          .catch(() => {});
       }
     }
 

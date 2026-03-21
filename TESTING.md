@@ -83,6 +83,29 @@ git push && git push origin v0.4.x
 
 > ⚠️ **Never `git push` without also pushing a tag.** A plain `git push` does NOT trigger a CI build. The tag push (`git push origin vX.Y.Z`) is what starts the GitHub Actions workflow.
 
+### Branch build (Windows `.exe` without tagging)
+
+Use this when you need an installer from a **feature branch** (e.g. QA before merge to `main`). **Pushing the branch does not start CI** — you must run the workflow manually.
+
+1. Push your branch to GitHub.
+2. Open **Actions** → workflow **Release** → **Run workflow**.
+3. Under **Use workflow from**, select your branch (e.g. `bishi/aut-118-pause-ack-heartbeat`).
+4. Run workflow. When it finishes (~10–20+ min), either:
+   - Download artifact **`auto-scraper-agent-windows`** from the run, or  
+   - Use the rolling **`latest`** pre-release (manual runs attach the NSIS installer there; see URLs below).
+
+**CLI** (requires [`gh`](https://cli.github.com/) and repo access):
+
+```bash
+cd /path/to/auto-scraper-agent
+gh workflow run "Release" --ref your-branch-name
+```
+
+**Notes**
+
+- The **“Sync version from tag”** CI step only runs for **`v*.*.*` tags**. Branch builds use whatever version is already in `src-tauri/tauri.conf.json` and `AGENT_VERSION` in `scraper-node/src/index.ts` on that branch.
+- Same full pipeline as a tag build (tests, SEA sidecar, Tauri NSIS); signing runs if `WINDOWS_CERTIFICATE` is configured.
+
 ## 7. Testing the auto-update flow
 
 The agent checks for updates 15 seconds after launch via the GitHub Releases API. To test locally without a full release cycle:
@@ -140,4 +163,6 @@ Tagged `latest`, marked pre-release. Use for testing unreleased builds.
 4. Dashboard shows the new scrape run with listings
 5. Tray tooltip shows next scrape time (updates after each completed run)
 6. Pause/Resume from the server dashboard propagates within one heartbeat (~60 s); resuming does **not** trigger an immediate scrape — the countdown is restored
-7. "Check for Updates" in tray shows "up to date" dialog when on latest version
+7. **Trigger scrape** / **Stop scrape** (dashboard or server `/agent` page): server keeps the command until the sidecar heartbeats **`ackCommandId`** after applying (if a scrape is already running, `scrape_now` stays queued until the scheduler can start — not lost on first heartbeat)
+8. Admin **Check for Updates** (fleet): same ack path as other commands — agent logs `Server command: check_update` and sets the update-check flag
+9. "Check for Updates" in tray shows "up to date" dialog when on latest version
