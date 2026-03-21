@@ -118,11 +118,14 @@ const server = http.createServer((req, res) => {
 
       if (method === "GET" && pathname === "/config") {
         const config = readConfig();
-        // Never expose the API key — return serverUrl + a flag so the UI
-        // can show "key saved" without revealing the actual value.
+        const key = config?.apiKey;
+        // Never expose the full key — same tail convention as admin Fleet (last 4 chars).
+        const apiKeyTail =
+          key && key.length >= 4 ? key.slice(-4) : null;
         return sendJson(res, 200, {
           serverUrl: config?.serverUrl ?? null,
-          hasApiKey: !!config?.apiKey,
+          hasApiKey: !!key,
+          apiKeyTail,
         });
       }
 
