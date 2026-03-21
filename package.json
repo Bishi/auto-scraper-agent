@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Tauri tray agent for Auto-Scraper",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "generate:icons": "node generate-icons.mjs",
     "build:sidecar": "cd scraper-node && node build.mjs",

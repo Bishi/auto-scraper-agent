@@ -1,5 +1,13 @@
 # Security & Secret Handling
 
+## Reporting a vulnerability
+
+**Preferred:** use [GitHub private security advisories](https://docs.github.com/en/code-security/security-advisories) on this repository if they are enabled.
+
+**Otherwise:** follow **Reporting a security issue** at the end of this document (private contact — do not file public issues for unfixed vulnerabilities).
+
+---
+
 This document explains how the auto-scraper agent handles credentials, what is (and is not) embedded in the compiled binary, and how to provision secrets at runtime.
 
 ---
