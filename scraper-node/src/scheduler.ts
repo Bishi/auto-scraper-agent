@@ -120,7 +120,9 @@ export class Scheduler {
           }
 
           // scrape_now / stop_scrape / check_update — ack only after we apply locally (same id as pause/resume).
-          if (res.command === "scrape_now" && res.commandId) {
+          // Skip if _pendingAckCommandId already equals res.commandId — command was already applied,
+          // we're just waiting for the server to clear it. Prevents duplicate execution on echo.
+          if (res.command === "scrape_now" && res.commandId && res.commandId !== this._pendingAckCommandId) {
             if (!this._running) {
               console.log("[agent] Server command: scrape_now");
               void this.triggerNow(client, "server");
@@ -128,11 +130,11 @@ export class Scheduler {
             }
             // If already running, do not ack — server keeps pending until next heartbeat.
           }
-          if (res.command === "stop_scrape" && res.commandId) {
+          if (res.command === "stop_scrape" && res.commandId && res.commandId !== this._pendingAckCommandId) {
             this.stopScrape();
             this._pendingAckCommandId = res.commandId;
           }
-          if (res.command === "check_update" && res.commandId) {
+          if (res.command === "check_update" && res.commandId && res.commandId !== this._pendingAckCommandId) {
             console.log("[agent] Server command: check_update");
             this._pendingUpdateCheck = true;
             this._pendingAckCommandId = res.commandId;
