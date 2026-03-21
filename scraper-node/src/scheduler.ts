@@ -39,7 +39,25 @@ export class Scheduler {
     this._version = version;
     this._paused = false;
     this.startHeartbeat(client);
-    void this.runCycle(client, true, "startup");
+    void this.scheduleInitialRun(client);
+  }
+
+  /**
+   * First run after `intervalMs` — no immediate scrape on process start (avoids a full cycle every
+   * agent restart). Manual / server `scrape_now` still uses {@link triggerNow}.
+   */
+  private async scheduleInitialRun(client: AgentApiClient): Promise<void> {
+    try {
+      const [schedule] = await Promise.all([client.getSchedule(), client.getConfig()]);
+      const intervalMs = schedule.intervalMs;
+      this.nextRunAt = Date.now() + intervalMs;
+      console.log(
+        `[agent] Scheduler started — first automated scrape in ${Math.round(intervalMs / 60_000)} min (no immediate run on launch)`,
+      );
+      this.scrapeTimer = setTimeout(() => void this.runCycle(client, true, "schedule"), intervalMs);
+    } catch (err) {
+      console.error("[agent] Failed to schedule initial run:", err);
+    }
   }
 
   stop(): void {

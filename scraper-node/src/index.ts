@@ -230,9 +230,13 @@ const server = http.createServer((req, res) => {
       }
 
       if (method === "POST" && pathname === "/stop") {
+        console.log("[agent] Application shutdown requested (POST /stop)");
         scheduler.stop();
         sendJson(res, 200, { ok: true });
-        setTimeout(() => process.exit(0), 500);
+        setTimeout(() => {
+          console.log("[agent] Application process exiting");
+          process.exit(0);
+        }, 500);
         return;
       }
 
@@ -269,8 +273,21 @@ server.on("error", (err: NodeJS.ErrnoException) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
+  console.log(`[agent] Application process started (PID ${process.pid})`);
   console.log(`[agent] Auto-Scraper agent v${AGENT_VERSION} listening on http://127.0.0.1:${PORT}`);
 });
+
+function shutdownFromSignal(signal: string): void {
+  console.log(`[agent] Application shutdown requested (${signal})`);
+  scheduler.stop();
+  setTimeout(() => {
+    console.log("[agent] Application process exiting");
+    process.exit(0);
+  }, 300);
+}
+
+process.on("SIGINT", () => shutdownFromSignal("SIGINT"));
+process.on("SIGTERM", () => shutdownFromSignal("SIGTERM"));
 
 // Auto-start scheduler if already configured from a previous run
 const storedConfig = readConfig();
