@@ -79,8 +79,17 @@ You only need Node.js — no Rust, no Tauri, no compiled binary.
 
 ### 1. Install dependencies
 
+The sidecar’s `package.json` lives under **`scraper-node`**, so you must run **`npm install` there**, not from the repository root (a root-level install does not install the sidecar’s dependencies).
+
 ```bash
 cd scraper-node
+npm install
+```
+
+Example from a Windows clone:
+
+```powershell
+cd c:\Github\auto-scrapper-agent\scraper-node
 npm install
 ```
 
