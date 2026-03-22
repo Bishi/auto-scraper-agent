@@ -66,7 +66,6 @@ export function parseListings(html: string, sourceUrl: string): Listing[] {
       : `https://www.avto.net${cleanHref.startsWith("/") ? "" : "/"}${cleanHref}`;
 
     const contentHash = computeHash(title, price, metadata);
-    const fingerprint = computeFingerprint(title, price, metadata["mileage"] ?? null);
     const now = new Date().toISOString();
 
     listings.push({
@@ -78,7 +77,6 @@ export function parseListings(html: string, sourceUrl: string): Listing[] {
       price,
       metadata,
       contentHash,
-      fingerprint,
       firstSeenAt: now,
       lastSeenAt: now,
     });
@@ -150,20 +148,6 @@ function parsePrice(text: string): number | null {
   return isNaN(num) ? null : num;
 }
 
-/**
- * Repost fingerprint: SHA256(normalizedTitle|price|mileage).
- * More stable than contentHash — used to detect the same car reposted with a new listing ID.
- * Server recomputes and overwrites this value; agent sends it as a hint only.
- */
-function computeFingerprint(
-  title: string,
-  price: number | null,
-  mileage: unknown,
-): string {
-  const normalizedTitle = title.trim().toLowerCase().replace(/\s+/g, " ");
-  const payload = `${normalizedTitle}|${price}|${mileage ?? null}`;
-  return createHash("sha256").update(payload).digest("hex");
-}
 
 function computeHash(
   title: string,
