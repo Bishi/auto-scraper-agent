@@ -1,18 +1,15 @@
 import http from "node:http";
-import { randomBytes } from "node:crypto";
 import { rmSync, existsSync, appendFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { readConfig, writeConfig } from "./store.js";
 import { AgentApiClient } from "./api-client.js";
 import { Scheduler } from "./scheduler.js";
+import { SIDECAR_TOKEN, isAuthorized } from "./auth.js";
 
-// Generate a fresh ephemeral secret on every startup. The Rust shell captures
-// this from stdout and stores it so it can be included in all HTTP requests to
-// this server. The renderer retrieves it via the get_sidecar_token Tauri command.
+// Announce the token on stdout before the HTTP server starts.
 // Written via process.stdout.write (not console.log) to avoid the log-intercept
 // prefix and to prevent the secret from appearing in the log buffer or log file.
-const SIDECAR_TOKEN = randomBytes(32).toString("hex");
 process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 
 // Must match USER_DATA_DIR in shared/browser/context.ts
@@ -129,7 +126,7 @@ const server = http.createServer((req, res) => {
       }
 
       // All other routes require the shared secret generated at startup.
-      if (req.headers["x-sidecar-token"] !== SIDECAR_TOKEN) {
+      if (!isAuthorized(req.headers)) {
         return sendJson(res, 401, { error: "Unauthorized" });
       }
 
