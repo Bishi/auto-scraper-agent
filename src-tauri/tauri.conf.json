@@ -13,6 +13,8 @@
   "bundle": {
     "active": true,
     "targets": "nsis",
+    "license": "MIT",
+    "licenseFile": "EULA.txt",
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"

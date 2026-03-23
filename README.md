@@ -2,6 +2,20 @@
 
 A Windows system tray app that runs scrape jobs on a schedule and reports results back to your Auto-Scraper server.
 
+**This repository** is open source under the MIT License. The **hosted dashboard / server** (`auto-scraper`) is a separate, **proprietary** codebase — only the agent is licensed here under MIT.
+
+## Legal & privacy
+
+- [LICENSE](LICENSE) — MIT
+- [SECURITY.md](SECURITY.md) — vulnerability reporting and how secrets are handled
+- [PRIVACY.md](PRIVACY.md) — local config and what leaves your machine
+
+The full **End User License Agreement** text shown in the NSIS installer is in [`src-tauri/EULA.txt`](src-tauri/EULA.txt).
+
+## Scraping disclaimer
+
+You are solely responsible for lawful use and for complying with each target site's terms of service. Do not bypass anti-bot measures or access controls. The software is provided "as is," without warranty, for lawful monitoring only. See `EULA.txt` for the complete terms.
+
 ---
 
 ## Using the agent
@@ -78,104 +92,6 @@ You only need Node.js — no Rust, no Tauri, no compiled binary.
 - Your running Auto-Scraper server with an API key
 
 ### 1. Install dependencies
-
-The sidecar’s `package.json` lives under **`scraper-node`**, so you must run **`npm install` there**, not from the repository root (a root-level install does not install the sidecar’s dependencies).
-
-```bash
-cd scraper-node
-npm install
-```
-
-Example from a Windows clone:
-
-```powershell
-cd c:\Github\auto-scrapper-agent\scraper-node
-npm install
-```
-
-### 2. Download Chromium
-
-The scraper uses [Playwright](https://playwright.dev/) for browser automation with a pinned Chromium headless shell. Playwright does not download the browser automatically during `npm install` — you need to do it once:
-
-```bash
-npx playwright install chromium-headless-shell
-```
-
-This downloads ~150 MB to Playwright's local browser cache (`%LOCALAPPDATA%\ms-playwright` on Windows). It only needs to be done once per machine; subsequent runs reuse it. When running as a compiled `.exe`, Chromium is bundled into the installer instead.
-
-### 3. Start the sidecar
-
-```bash
-cd scraper-node
-npm run dev
-```
-
-Expected output within a few seconds:
-
-```
-[HH:MM:SS] [agent] Application process started (PID 12345)
-[HH:MM:SS] [agent] Auto-Scraper agent v0.5.x listening on http://127.0.0.1:9001
-[HH:MM:SS] [agent] No saved config. POST http://127.0.0.1:9001/config with { apiKey, serverUrl } to start.
-```
-
-### 4. Configure it
-
-```powershell
-Invoke-RestMethod -Method Post http://127.0.0.1:9001/config `
-  -ContentType "application/json" `
-  -Body '{"apiKey":"<your-api-key>","serverUrl":"https://your-server.example.com"}'
-```
-
-The config is saved to `~/.auto-scraper/agent.json` and reloaded automatically on subsequent starts.
-
-### 5. Verify it's running
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:9001/health
-# → hasApiKey : True  version : 0.5.x
-```
-
-### 6. Trigger a scrape manually (optional)
-
-```powershell
-Invoke-RestMethod -Method Post http://127.0.0.1:9001/scrape/now
-```
-
-### Full API reference
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Agent version and config status |
-| `GET` | `/config` | Current server URL and API key tail |
-| `GET` | `/schedule` | Next run time, paused/running state |
-| `GET` | `/logs` | JSON array of up to 300 log entries |
-| `POST` | `/config` | Save `{ apiKey, serverUrl }` and (re)start scheduler |
-| `POST` | `/scrape/now` | Trigger an immediate scrape |
-| `POST` | `/scrape/stop` | Abort the current scrape after the active module finishes |
-| `POST` | `/scheduler/pause` | Pause the scheduler (scrapes stop until resumed) |
-| `POST` | `/scheduler/resume` | Resume the scheduler |
-| `POST` | `/clear-profile` | Delete the saved Chromium browser profile |
-| `POST` | `/stop` | Graceful shutdown |
-| | | |
-| `GET` | `/update/check` | *(internal)* Tauri shell polls this to consume a server-issued `check_update` command |
-| `POST` | `/log` | *(internal)* Tauri shell forwards log messages into the sidecar's ring buffer |
-
----
-
-## Building your own `.exe`
-
-This produces a signed (or unsigned) Windows NSIS installer — the same artifact that GitHub Actions creates on every release.
-
-### Prerequisites
-
-| Tool | Version | Notes |
-|------|---------|-------|
-| [Node.js](https://nodejs.org/) | 22 | Matches CI |
-| [Rust + Cargo](https://rustup.rs/) | stable | `rustup install stable` |
-| [Tauri CLI v2](https://tauri.app/start/prerequisites/) | `npm i -g @tauri-apps/cli@^2` | Or use the local dep via `npx tauri` |
-| [WebView2 runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) | latest | Pre-installed on Windows 10 21H2+ |
-
-### 1. Clone and install
 
 ```bash
 git clone https://github.com/Bishi/auto-scraper-agent.git
