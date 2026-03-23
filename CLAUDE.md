@@ -33,6 +33,15 @@ renderer/            ← Setup/logs window (plain HTML/JS)
 
 All PRs target **`main`**.
 
+## Pre-PR Checklist — Run Before EVERY Pull Request
+
+Before opening a PR (or when the user asks to open one), go through this list in full. Do not open the PR until all items are resolved.
+
+- [ ] **Tests** — are there unit or integration tests for the changed behaviour? If not, add them now. Security, auth, and sidecar HTTP changes always require tests.
+- [ ] **All `.md` files audited** — check every `.md` in the repo: `README.md`, `SECURITY.md`, `TESTING.md`, `CLAUDE.md`. Ask "would a reader now get a wrong picture of how the system works?"
+- [ ] **Manual test steps** — are the `TESTING.md` curl commands, steps, and expected outputs still accurate for the change?
+- [ ] **Lessons captured** — did anything go wrong or require a correction during this task? If yes, `C:\Github\auto-scrapper\tasks\lessons.md` must be updated before the PR is opened.
+
 ---
 
 ## Workflow Principles
