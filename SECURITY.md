@@ -34,11 +34,12 @@ The build pipeline does not inject any environment variables or secrets into the
 ### First launch
 
 1. The Tauri shell starts the Node.js sidecar on `127.0.0.1:9001`.
-2. The setup window opens automatically (WebView2).
-3. The user enters their **Server URL** and **API key** obtained from the dashboard (`Settings → API`).
-4. On submit, the Tauri shell calls `invoke("save_config", { serverUrl, apiKey })`.
-5. The Rust backend POSTs `{ serverUrl, apiKey }` to `http://127.0.0.1:9001/config`.
-6. The sidecar writes the config to `~/.auto-scraper/agent.json` and starts the scheduler.
+2. The sidecar generates a random 32-byte ephemeral token and writes it to stdout (`SIDECAR_TOKEN=<hex>`). The Rust watchdog captures this and stores it in memory. The renderer retrieves it via the `get_sidecar_token` Tauri command. This token is required on every HTTP request to the sidecar (see [Sidecar HTTP authentication](#sidecar-http-authentication) below).
+3. The setup window opens automatically (WebView2).
+4. The user enters their **Server URL** and **API key** obtained from the dashboard (`Settings → API`).
+5. On submit, the Tauri shell calls `invoke("save_config", { serverUrl, apiKey })`.
+6. The Rust backend POSTs `{ serverUrl, apiKey }` to `http://127.0.0.1:9001/config` with the `X-Sidecar-Token` header.
+7. The sidecar writes the config to `~/.auto-scraper/agent.json` and starts the scheduler.
 
 ### Subsequent launches
 
@@ -60,6 +61,18 @@ Open the setup window again (right-click the tray icon → **Settings**), enter 
 | Binary (`.exe`) | – | Nothing sensitive |
 | Windows Registry | – | Nothing (Tauri does not write credentials to the registry) |
 | Environment variables | – | Nothing (agent doesn't rely on env vars for secrets) |
+| Rust process memory | In-memory only | Ephemeral sidecar token — discarded on app exit, regenerated on every sidecar start |
+
+---
+
+## Sidecar HTTP authentication
+
+The sidecar HTTP server (`127.0.0.1:9001`) requires an `X-Sidecar-Token` header on every request except:
+
+- `OPTIONS` preflight requests (browsers never include custom headers in preflights)
+- `GET /health` (used by the Rust shell to detect readiness before the token is available)
+
+The token is a random 32-byte hex string generated on each sidecar startup. It is never written to disk, never logged, and is only accessible to the Tauri process that spawned the sidecar. Any other local process attempting to call the sidecar without the token receives a `401 Unauthorized` response.
 
 The `agent.json` file is created by the sidecar and is readable only by the current user on a standard Windows installation. Consider restricting permissions further (`icacls "%USERPROFILE%\.auto-scraper\agent.json" /inheritance:r /grant:r "%USERNAME%":F`) if you're deploying in a shared-machine environment.
 

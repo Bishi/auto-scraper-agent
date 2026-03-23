@@ -25,18 +25,36 @@ curl http://127.0.0.1:9001/health
 # → {"hasApiKey":true,"version":"0.4.x"}
 ```
 
+`/health` is intentionally public — it's used by the Rust shell to detect sidecar readiness before the token is available.
+
+## 2a. Get the sidecar token
+
+All other endpoints require the `X-Sidecar-Token` header. The token is printed to the terminal on startup:
+
+```
+SIDECAR_TOKEN=a3f9c2...  ← copy this value
+```
+
+Set it in your shell for the steps below:
+
+```bash
+TOKEN=<paste token here>
+```
+
 ## 3. Configure (first run or after wiping config)
 
 ```bash
 curl -X POST http://127.0.0.1:9001/config \
   -H "Content-Type: application/json" \
+  -H "X-Sidecar-Token: $TOKEN" \
   -d '{"apiKey":"<your-api-key>","serverUrl":"http://localhost:3000"}'
 ```
 
 ## 4. Trigger a scrape and watch for errors
 
 ```bash
-curl -X POST http://127.0.0.1:9001/scrape/now
+curl -X POST http://127.0.0.1:9001/scrape/now \
+  -H "X-Sidecar-Token: $TOKEN"
 ```
 
 Watch the sidecar terminal. A successful scrape prints module names and
