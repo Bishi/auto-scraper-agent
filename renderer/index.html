@@ -422,15 +422,28 @@
       const keyInput    = document.getElementById("api-key");
       const keyHint     = document.getElementById("key-hint");
 
+      /** Placeholder when a key is stored — matches admin Fleet: •••• + last 4 chars. */
+      function setSavedKeyPlaceholder(apiKeyTail) {
+        keyInput.value = "";
+        if (typeof apiKeyTail === "string" && apiKeyTail.length >= 4) {
+          keyInput.placeholder = "••••" + apiKeyTail.slice(-4) + "  (saved)";
+        } else {
+          keyInput.placeholder = "••••••••  (saved)";
+        }
+        keyHint.style.display = "block";
+      }
+
       async function loadConfig() {
         try {
           const res = await fetchTimeout(`${SIDECAR}/config`);
           if (!res.ok) return;
           const data = await res.json();
-          if (data.serverUrl)  serverInput.value = data.serverUrl;
+          if (data.serverUrl) serverInput.value = data.serverUrl;
           if (data.hasApiKey) {
-            keyInput.placeholder   = "••••••••  (saved)";
-            keyHint.style.display  = "block";
+            setSavedKeyPlaceholder(data.apiKeyTail);
+          } else {
+            keyHint.style.display = "none";
+            keyInput.placeholder = "as_live_…";
           }
         } catch { /* sidecar not up yet — silently ignore */ }
       }
@@ -461,12 +474,8 @@
         try {
           await invoke("save_config", { apiKey, serverUrl });
           successEl.style.display = "block";
-          if (apiKey) {
-            // Key was just saved — switch to "saved" placeholder
-            keyInput.value       = "";
-            keyInput.placeholder = "••••••••  (saved)";
-            keyHint.style.display = "block";
-          }
+          // Refresh from sidecar so placeholder shows key tail (Fleet-style) even when key was left blank
+          await loadConfig();
         } catch (err) {
           errorEl.textContent   = String(err);
           errorEl.style.display = "block";

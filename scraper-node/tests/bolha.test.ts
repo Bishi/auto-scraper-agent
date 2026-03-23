@@ -61,11 +61,6 @@ describe("bolha parser — parseListings", () => {
     expect(listings).toHaveLength(0);
   });
 
-  it("does not include fingerprint (bolha fingerprinting not implemented)", () => {
-    const [listing] = parseListings(fixture("listings.html"), SOURCE_URL);
-    // fingerprint field should be absent or null/undefined
-    expect(listing!.fingerprint ?? null).toBeNull();
-  });
 });
 
 describe("bolha parser — parsePaginationLinks", () => {

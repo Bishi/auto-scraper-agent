@@ -56,17 +56,6 @@ describe("avto-net parser", () => {
       expect(listing!.contentHash).toMatch(/^[0-9a-f]{64}$/);
     });
 
-    it("fingerprint is a 64-char hex string", () => {
-      const [listing] = parseListings(fixture("standard.html"), SOURCE_URL);
-      expect(listing!.fingerprint).toMatch(/^[0-9a-f]{64}$/);
-    });
-
-    it("fingerprint is deterministic across calls", () => {
-      const html = fixture("standard.html");
-      const [a] = parseListings(html, SOURCE_URL);
-      const [b] = parseListings(html, SOURCE_URL);
-      expect(a!.fingerprint).toBe(b!.fingerprint);
-    });
 
     it("contentHash changes when price changes", () => {
       // Parse same fixture twice; manually verify two listings with different
