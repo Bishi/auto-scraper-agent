@@ -1,4 +1,5 @@
 import http from "node:http";
+import { randomBytes } from "node:crypto";
 import { rmSync, existsSync, appendFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -6,11 +7,19 @@ import { readConfig, writeConfig } from "./store.js";
 import { AgentApiClient } from "./api-client.js";
 import { Scheduler } from "./scheduler.js";
 
+// Generate a fresh ephemeral secret on every startup. The Rust shell captures
+// this from stdout and stores it so it can be included in all HTTP requests to
+// this server. The renderer retrieves it via the get_sidecar_token Tauri command.
+// Written via process.stdout.write (not console.log) to avoid the log-intercept
+// prefix and to prevent the secret from appearing in the log buffer or log file.
+const SIDECAR_TOKEN = randomBytes(32).toString("hex");
+process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
+
 // Must match USER_DATA_DIR in shared/browser/context.ts
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.5.28";
+const AGENT_VERSION = "0.5.29";
 
 // ---------------------------------------------------------------------------
 // Log buffer — persisted to ~/.auto-scraper/agent.log (NDJSON) so history
@@ -73,7 +82,7 @@ const scheduler = new Scheduler();
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, X-Sidecar-Token",
 };
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
@@ -105,15 +114,23 @@ const server = http.createServer((req, res) => {
   void (async () => {
     try {
       // Handle CORS preflight — WebView2 sends OPTIONS before cross-origin POSTs.
+      // Must bypass token check: browsers never include custom headers in preflights.
       if (method === "OPTIONS") {
         res.writeHead(204, CORS_HEADERS);
         res.end();
         return;
       }
 
+      // Public health endpoint — used by the Rust shell to detect sidecar readiness
+      // before the token has been captured from stdout.
       if (method === "GET" && pathname === "/health") {
         const config = readConfig();
         return sendJson(res, 200, { hasApiKey: !!config?.apiKey, version: AGENT_VERSION });
+      }
+
+      // All other routes require the shared secret generated at startup.
+      if (req.headers["x-sidecar-token"] !== SIDECAR_TOKEN) {
+        return sendJson(res, 401, { error: "Unauthorized" });
       }
 
       if (method === "GET" && pathname === "/config") {
