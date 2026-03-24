@@ -256,6 +256,12 @@ export class Scheduler {
       }
       console.log(`[agent] Scraping ${moduleName}...`);
       const moduleStartedAt = new Date();
+      const jobId = jobMap.get(moduleName);
+      if (jobId !== undefined) {
+        await client.startJob(jobId, moduleStartedAt.toISOString()).catch((err: unknown) => {
+          console.warn(`[agent] Failed to mark job ${jobId} as running:`, err);
+        });
+      }
       try {
         let result = await runModule(moduleName, moduleConfig, browserOptions);
         let wasRetried = false;

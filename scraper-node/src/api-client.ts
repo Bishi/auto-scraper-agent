@@ -65,6 +65,13 @@ export class AgentApiClient {
     return this.request<Schedule>("/api/agent/schedule");
   }
 
+  async startJob(jobId: number, startedAt: string): Promise<void> {
+    await this.request<{ ok: boolean }>(`/api/agent/jobs/${jobId}/start`, {
+      method: "POST",
+      body: JSON.stringify({ startedAt }),
+    });
+  }
+
   async pushResults(params: PushResultsParams): Promise<PushResultsResponse> {
     return this.request<PushResultsResponse>("/api/agent/results", {
       method: "POST",
