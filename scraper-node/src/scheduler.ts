@@ -248,16 +248,23 @@ export class Scheduler {
       ? { headless: config.browser.headless ?? true, timeout: config.browser.timeout }
       : undefined;
 
+    const startedJobIds = new Set<number>();
+
     for (const [moduleName, moduleConfig] of enabled) {
       if (this._stopRequested) {
         this._stopRequested = false;
         console.log("[agent] ──────────── Scrape halted by user request ────────────");
+        const cancelIds = [...jobMap.values()].filter((id) => !startedJobIds.has(id));
+        client.cancelJobs(cancelIds).catch((err: unknown) => {
+          console.warn("[agent] Failed to cancel skipped jobs:", err);
+        });
         break;
       }
       console.log(`[agent] Scraping ${moduleName}...`);
       const moduleStartedAt = new Date();
       const jobId = jobMap.get(moduleName);
       if (jobId !== undefined) {
+        startedJobIds.add(jobId);
         await client.startJob(jobId, moduleStartedAt.toISOString()).catch((err: unknown) => {
           console.warn(`[agent] Failed to mark job ${jobId} as running:`, err);
         });

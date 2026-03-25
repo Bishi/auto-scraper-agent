@@ -65,6 +65,14 @@ export class AgentApiClient {
     return this.request<Schedule>("/api/agent/schedule");
   }
 
+  async cancelJobs(jobIds: number[]): Promise<void> {
+    if (jobIds.length === 0) return;
+    await this.request<{ ok: boolean }>("/api/agent/jobs/cancel", {
+      method: "POST",
+      body: JSON.stringify({ jobIds }),
+    });
+  }
+
   async startJob(jobId: number, startedAt: string): Promise<void> {
     await this.request<{ ok: boolean }>(`/api/agent/jobs/${jobId}/start`, {
       method: "POST",
