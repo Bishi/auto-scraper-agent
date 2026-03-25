@@ -308,13 +308,19 @@ export class Scheduler {
         );
       } catch (err) {
         this._activeJobId = null;
-        console.error(`[agent] Failed to scrape/push ${moduleName}:`, err);
+        const errMsg = String(err);
+        const isRateLimited = errMsg.includes("Rate limited (429)");
+        if (isRateLimited) {
+          console.warn(`[agent] Rate limited by server — results not delivered for ${moduleName}. Will retry next scheduled run.`);
+        } else {
+          console.error(`[agent] Failed to scrape/push ${moduleName}:`, err);
+        }
         client
           .heartbeat(this._version, process.platform, {
             schedulerPaused: this._paused,
             activeJobId: this._activeJobId,
             ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
-            failureMsg: String(err),
+            failureMsg: errMsg,
           })
           .catch(() => {});
       }

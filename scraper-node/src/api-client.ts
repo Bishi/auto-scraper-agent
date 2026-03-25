@@ -52,6 +52,9 @@ export class AgentApiClient {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      if (res.status === 429) {
+        throw new Error(`Rate limited (429) — ${options?.method ?? "GET"} ${path} quota exceeded. Results will be retried next scheduled run.`);
+      }
       throw new Error(`API ${options?.method ?? "GET"} ${path} → ${res.status}: ${text}`);
     }
     return res.json() as Promise<T>;

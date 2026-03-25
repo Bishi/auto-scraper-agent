@@ -25,7 +25,7 @@ const AGENT_VERSION = "0.5.36";
 
 interface LogEntry {
   ts: string;
-  level: "info" | "error";
+  level: "info" | "warn" | "error";
   msg: string;
 }
 
@@ -53,7 +53,7 @@ const LOG_BUFFER: LogEntry[] = (() => {
   }
 })();
 
-function pushLog(level: "info" | "error", ...args: unknown[]): void {
+function pushLog(level: "info" | "warn" | "error", ...args: unknown[]): void {
   const entry: LogEntry = { ts: new Date().toISOString(), level, msg: args.map((a) => (typeof a === "string" ? a : String(a))).join(" ") };
   LOG_BUFFER.push(entry);
   if (LOG_BUFFER.length > MAX_LOG_LINES) LOG_BUFFER.shift();
@@ -63,10 +63,12 @@ function pushLog(level: "info" | "error", ...args: unknown[]): void {
 }
 
 // Intercept all console output so every module's logs are captured.
-const _origLog = console.log.bind(console);
-const _origErr = console.error.bind(console);
+const _origLog  = console.log.bind(console);
+const _origWarn = console.warn.bind(console);
+const _origErr  = console.error.bind(console);
 const hhmm = () => new Date().toTimeString().slice(0, 8);
-console.log = (...args: unknown[]) => { pushLog("info", ...args); _origLog(`[${hhmm()}]`, ...args); };
+console.log  = (...args: unknown[]) => { pushLog("info",  ...args); _origLog(`[${hhmm()}]`,  ...args); };
+console.warn = (...args: unknown[]) => { pushLog("warn",  ...args); _origWarn(`[${hhmm()}]`, ...args); };
 console.error = (...args: unknown[]) => { pushLog("error", ...args); _origErr(`[${hhmm()}]`, ...args); };
 
 // ---------------------------------------------------------------------------
@@ -157,9 +159,10 @@ const server = http.createServer((req, res) => {
 
       if (method === "POST" && pathname === "/log") {
         const body = await readBody(req) as { level?: string; msg?: string };
-        const level = body.level === "error" ? "error" : "info";
+        const level = body.level === "error" ? "error" : body.level === "warn" ? "warn" : "info";
         const msg = typeof body.msg === "string" ? body.msg : String(body.msg ?? "");
         if (level === "error") console.error(msg);
+        else if (level === "warn") console.warn(msg);
         else console.log(msg);
         return sendJson(res, 200, { ok: true });
       }
