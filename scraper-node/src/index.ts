@@ -1,75 +1,23 @@
 import http from "node:http";
-import { rmSync, existsSync, appendFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { readConfig, writeConfig } from "./store.js";
 import { AgentApiClient } from "./api-client.js";
 import { Scheduler } from "./scheduler.js";
 import { SIDECAR_TOKEN, isAuthorized } from "./auth.js";
+import { AGENT_LOG_BUFFER, SCRAPER_LOG_BUFFER, agentLogger } from "./logger.js";
 
 // Announce the token on stdout before the HTTP server starts.
-// Written via process.stdout.write (not console.log) to avoid the log-intercept
-// prefix and to prevent the secret from appearing in the log buffer or log file.
+// Written via process.stdout.write (not console.log) to avoid the log buffer
+// and to prevent the secret from appearing in log files.
 process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 
 // Must match USER_DATA_DIR in shared/browser/context.ts
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.5.36";
-
-// ---------------------------------------------------------------------------
-// Log buffer — persisted to ~/.auto-scraper/agent.log (NDJSON) so history
-// survives agent restarts. In-memory ring kept at MAX_LOG_LINES for the UI.
-// ---------------------------------------------------------------------------
-
-interface LogEntry {
-  ts: string;
-  level: "info" | "warn" | "error";
-  msg: string;
-}
-
-const LOG_DIR  = join(homedir(), ".auto-scraper", "logs");
-const LOG_FILE = join(LOG_DIR, "agent.log");
-const MAX_LOG_LINES      = 300;  // in-memory ring shown in UI
-const MAX_LOG_FILE_LINES = 5000; // rotate file when it exceeds this
-
-// Ensure the logs directory exists before reading or writing.
-try { mkdirSync(LOG_DIR, { recursive: true }); } catch { /* ignore */ }
-
-// Load existing log history from disk into the ring buffer on startup.
-const LOG_BUFFER: LogEntry[] = (() => {
-  try {
-    const lines = readFileSync(LOG_FILE, "utf8").split("\n").filter(Boolean);
-    // Trim the file if it has grown too large.
-    if (lines.length > MAX_LOG_FILE_LINES) {
-      const trimmed = lines.slice(-MAX_LOG_FILE_LINES);
-      writeFileSync(LOG_FILE, trimmed.join("\n") + "\n", "utf8");
-      return trimmed.slice(-MAX_LOG_LINES).map((l) => JSON.parse(l) as LogEntry);
-    }
-    return lines.slice(-MAX_LOG_LINES).map((l) => JSON.parse(l) as LogEntry);
-  } catch {
-    return [];
-  }
-})();
-
-function pushLog(level: "info" | "warn" | "error", ...args: unknown[]): void {
-  const entry: LogEntry = { ts: new Date().toISOString(), level, msg: args.map((a) => (typeof a === "string" ? a : String(a))).join(" ") };
-  LOG_BUFFER.push(entry);
-  if (LOG_BUFFER.length > MAX_LOG_LINES) LOG_BUFFER.shift();
-  try {
-    appendFileSync(LOG_FILE, JSON.stringify(entry) + "\n", "utf8");
-  } catch { /* non-fatal — UI still works via in-memory buffer */ }
-}
-
-// Intercept all console output so every module's logs are captured.
-const _origLog  = console.log.bind(console);
-const _origWarn = console.warn.bind(console);
-const _origErr  = console.error.bind(console);
-const hhmm = () => new Date().toTimeString().slice(0, 8);
-console.log  = (...args: unknown[]) => { pushLog("info",  ...args); _origLog(`[${hhmm()}]`,  ...args); };
-console.warn = (...args: unknown[]) => { pushLog("warn",  ...args); _origWarn(`[${hhmm()}]`, ...args); };
-console.error = (...args: unknown[]) => { pushLog("error", ...args); _origErr(`[${hhmm()}]`, ...args); };
+const AGENT_VERSION = "0.5.41";
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
@@ -146,7 +94,11 @@ const server = http.createServer((req, res) => {
       }
 
       if (method === "GET" && pathname === "/logs") {
-        return sendJson(res, 200, { logs: LOG_BUFFER });
+        return sendJson(res, 200, { logs: AGENT_LOG_BUFFER });
+      }
+
+      if (method === "GET" && pathname === "/scraper-logs") {
+        return sendJson(res, 200, { logs: SCRAPER_LOG_BUFFER });
       }
 
       if (method === "GET" && pathname === "/schedule") {
@@ -161,15 +113,15 @@ const server = http.createServer((req, res) => {
         const body = await readBody(req) as { level?: string; msg?: string };
         const level = body.level === "error" ? "error" : body.level === "warn" ? "warn" : "info";
         const msg = typeof body.msg === "string" ? body.msg : String(body.msg ?? "");
-        if (level === "error") console.error(msg);
-        else if (level === "warn") console.warn(msg);
-        else console.log(msg);
+        if (level === "error") agentLogger.error(msg);
+        else if (level === "warn") agentLogger.warn(msg);
+        else agentLogger.info(msg);
         return sendJson(res, 200, { ok: true });
       }
 
       if (method === "POST" && pathname === "/scheduler/pause") {
         scheduler.pause();
-        console.log("[agent] Scheduler paused by user");
+        agentLogger.info("[agent] Scheduler paused by user");
         return sendJson(res, 200, { ok: true });
       }
 
@@ -178,7 +130,7 @@ const server = http.createServer((req, res) => {
           return sendJson(res, 400, { error: "Not configured. POST /config first." });
         }
         void scheduler.resume(client);
-        console.log("[agent] Scheduler resumed by user");
+        agentLogger.info("[agent] Scheduler resumed by user");
         return sendJson(res, 200, { ok: true });
       }
 
@@ -211,13 +163,13 @@ const server = http.createServer((req, res) => {
         const keyTail =
           resolvedKey.length >= 4 ? resolvedKey.slice(-4) : "????";
         if (!previous) {
-          console.log(
+          agentLogger.info(
             `[agent] Config saved (first run): serverUrl=${serverUrl}, apiKey tail ...${keyTail}`,
           );
         } else {
           const urlChanged = previous.serverUrl !== serverUrl;
           const keyChanged = previous.apiKey !== resolvedKey;
-          console.log(
+          agentLogger.info(
             `[agent] Config saved: serverUrl=${serverUrl}` +
               (urlChanged
                 ? ` (URL changed from ${previous.serverUrl})`
@@ -234,14 +186,14 @@ const server = http.createServer((req, res) => {
         if (!client) {
           return sendJson(res, 400, { error: "Not configured. POST /config first." });
         }
-        console.log("[agent] Scrape triggered by user");
+        agentLogger.info("[agent] Scrape triggered by user");
         void scheduler.triggerNow(client);
         return sendJson(res, 200, { ok: true, message: "Scrape triggered" });
       }
 
       if (method === "POST" && pathname === "/scrape/stop") {
         const wasRunning = scheduler.isRunning;
-        console.log(wasRunning ? "[agent] Scrape stopped by user" : "[agent] Stop requested — no scrape in progress");
+        agentLogger.info(wasRunning ? "[agent] Scrape stopped by user" : "[agent] Stop requested — no scrape in progress");
         scheduler.stopScrape();
         return sendJson(res, 200, {
           ok: true,
@@ -250,11 +202,11 @@ const server = http.createServer((req, res) => {
       }
 
       if (method === "POST" && pathname === "/stop") {
-        console.log("[agent] Application shutdown requested (POST /stop)");
+        agentLogger.info("[agent] Application shutdown requested (POST /stop)");
         scheduler.stop();
         sendJson(res, 200, { ok: true });
         setTimeout(() => {
-          console.log("[agent] Application process exiting");
+          agentLogger.info("[agent] Application process exiting");
           process.exit(0);
         }, 500);
         return;
@@ -264,20 +216,20 @@ const server = http.createServer((req, res) => {
         try {
           if (existsSync(BROWSER_PROFILE_DIR)) {
             rmSync(BROWSER_PROFILE_DIR, { recursive: true, force: true });
-            console.log("[agent] Browser profile cleared — will start fresh on next scrape");
+            agentLogger.info("[agent] Browser profile cleared — will start fresh on next scrape");
           } else {
-            console.log("[agent] Browser profile directory not found — nothing to clear");
+            agentLogger.info("[agent] Browser profile directory not found — nothing to clear");
           }
           return sendJson(res, 200, { ok: true });
         } catch (err) {
-          console.error("[agent] Failed to clear browser profile:", err);
+          agentLogger.error("[agent] Failed to clear browser profile: " + String(err));
           return sendJson(res, 500, { error: String(err) });
         }
       }
 
       sendJson(res, 404, { error: `${method} ${pathname} not found` });
     } catch (err) {
-      console.error("[agent] Request error:", err);
+      agentLogger.error("[agent] Request error: " + String(err));
       sendJson(res, 500, { error: String(err) });
     }
   })();
@@ -285,23 +237,23 @@ const server = http.createServer((req, res) => {
 
 server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
-    console.error(`[agent] Port ${PORT} is already in use — another instance may be running. Exiting.`);
+    agentLogger.error(`[agent] Port ${PORT} is already in use — another instance may be running. Exiting.`);
   } else {
-    console.error(`[agent] Server error:`, err);
+    agentLogger.error(`[agent] Server error: ${String(err)}`);
   }
   process.exit(1);
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[agent] Application process started (PID ${process.pid})`);
-  console.log(`[agent] Auto-Scraper agent v${AGENT_VERSION} listening on http://127.0.0.1:${PORT}`);
+  agentLogger.info(`[agent] Application process started (PID ${process.pid})`);
+  agentLogger.info(`[agent] Auto-Scraper agent v${AGENT_VERSION} listening on http://127.0.0.1:${PORT}`);
 });
 
 function shutdownFromSignal(signal: string): void {
-  console.log(`[agent] Application shutdown requested (${signal})`);
+  agentLogger.info(`[agent] Application shutdown requested (${signal})`);
   scheduler.stop();
   setTimeout(() => {
-    console.log("[agent] Application process exiting");
+    agentLogger.info("[agent] Application process exiting");
     process.exit(0);
   }, 300);
 }
@@ -312,9 +264,9 @@ process.on("SIGTERM", () => shutdownFromSignal("SIGTERM"));
 // Auto-start scheduler if already configured from a previous run
 const storedConfig = readConfig();
 if (storedConfig) {
-  console.log(`[agent] Loaded saved config: serverUrl=${storedConfig.serverUrl}`);
+  agentLogger.info(`[agent] Loaded saved config: serverUrl=${storedConfig.serverUrl}`);
   client = new AgentApiClient(storedConfig.serverUrl, storedConfig.apiKey);
   scheduler.start(client, AGENT_VERSION);
 } else {
-  console.log("[agent] No saved config. POST http://127.0.0.1:9001/config with { apiKey, serverUrl } to start.");
+  agentLogger.info("[agent] No saved config. POST http://127.0.0.1:9001/config with { apiKey, serverUrl } to start.");
 }

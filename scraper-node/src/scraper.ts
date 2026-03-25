@@ -2,6 +2,7 @@ import pino from "pino";
 import type { Logger } from "pino";
 import { Writable } from "node:stream";
 import { rmSync } from "node:fs";
+import { agentLogger } from "./logger.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { BrowserManager } from "./shared/browser/context.js";
@@ -117,7 +118,7 @@ export async function runModule(
     if (hadManagedChallenge) {
       try {
         rmSync(BROWSER_PROFILE_DIR, { recursive: true, force: true });
-        console.log("[agent] Browser profile auto-cleared after Managed Challenge — retrying immediately");
+        agentLogger.info("[agent] Browser profile auto-cleared after Managed Challenge — retrying immediately");
       } catch (_) { /* non-fatal */ }
     }
   }

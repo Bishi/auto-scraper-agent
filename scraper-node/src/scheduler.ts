@@ -1,5 +1,6 @@
 import type { AgentApiClient } from "./api-client.js";
 import { runModule } from "./scraper.js";
+import { agentLogger, pushScraperLogs } from "./logger.js";
 import type { DbConfig } from "./shared/types.js";
 
 const HEARTBEAT_INTERVAL_MS = 60_000;
@@ -58,9 +59,9 @@ export class Scheduler {
   stopScrape(): void {
     if (this._running) {
       this._stopRequested = true;
-      console.log("[agent] Stop requested — will halt after current module completes");
+      agentLogger.info("[agent] Stop requested — will halt after current module completes");
     } else {
-      console.log("[agent] Stop requested but no scrape is in progress");
+      agentLogger.info("[agent] Stop requested but no scrape is in progress");
     }
   }
 
@@ -77,7 +78,7 @@ export class Scheduler {
   }
 
   /**
-   * Resume scraping.  Restores the countdown that was active when pause() was called
+   * Resume scraping. Restores the countdown that was active when pause() was called
    * so the user isn't hit with an immediate scrape just for toggling pause.
    * Enforces a 60-second minimum so a pause-immediately-unpause can't trigger a run.
    */
@@ -90,13 +91,13 @@ export class Scheduler {
     this._pausedRemainingMs = null;
 
     this.nextRunAt = Date.now() + delay;
-    console.log(`[agent] Resumed — next scrape in ${Math.round(delay / 60_000)} min`);
+    agentLogger.info(`[agent] Resumed — next scrape in ${Math.round(delay / 60_000)} min`);
     this.scrapeTimer = setTimeout(() => void this.runCycle(client, true, "schedule"), delay);
   }
 
   async triggerNow(client: AgentApiClient, trigger: "manual" | "server" = "manual"): Promise<void> {
     if (this._running) {
-      console.log("[agent] Scrape already in progress — skipping manual trigger");
+      agentLogger.info("[agent] Scrape already in progress — skipping manual trigger");
       return;
     }
     // Clear existing timer so the 30-min clock resets from now
@@ -127,7 +128,7 @@ export class Scheduler {
           // we're just waiting for the server to clear it. Prevents duplicate execution on echo.
           if (res.command === "scrape_now" && res.commandId && res.commandId !== this._pendingAckCommandId) {
             if (!this._running) {
-              console.log("[agent] Server command: scrape_now");
+              agentLogger.info("[agent] Server command: scrape_now");
               void this.triggerNow(client, "server");
               this._pendingAckCommandId = res.commandId;
             }
@@ -138,7 +139,7 @@ export class Scheduler {
             this._pendingAckCommandId = res.commandId;
           }
           if (res.command === "check_update" && res.commandId && res.commandId !== this._pendingAckCommandId) {
-            console.log("[agent] Server command: check_update");
+            agentLogger.info("[agent] Server command: check_update");
             this._pendingUpdateCheck = true;
             this._pendingAckCommandId = res.commandId;
           }
@@ -149,26 +150,26 @@ export class Scheduler {
             try {
               if (!this._paused) {
                 this.pause();
-                console.log("[agent] Server command: pause");
+                agentLogger.info("[agent] Server command: pause");
               }
               if (res.commandId) {
                 this._pendingAckCommandId = res.commandId;
               }
             } catch (err) {
-              console.error("[agent] Failed to apply pause command:", err);
+              agentLogger.error("[agent] Failed to apply pause command: " + String(err));
             }
           }
           if (res.command === "resume") {
             try {
               if (this._paused) {
-                console.log("[agent] Server command: resume");
+                agentLogger.info("[agent] Server command: resume");
                 this.resume(client);
               }
               if (res.commandId) {
                 this._pendingAckCommandId = res.commandId;
               }
             } catch (err) {
-              console.error("[agent] Failed to apply resume command:", err);
+              agentLogger.error("[agent] Failed to apply resume command: " + String(err));
             }
           }
 
@@ -177,15 +178,15 @@ export class Scheduler {
           if (res.command !== "pause" && res.command !== "resume") {
             if (res.paused === true && !this._paused) {
               this.pause();
-              console.log("[agent] Scheduler paused (server echo)");
+              agentLogger.info("[agent] Scheduler paused (server echo)");
             } else if (res.paused === false && this._paused) {
-              console.log("[agent] Scheduler resumed (server echo)");
+              agentLogger.info("[agent] Scheduler resumed (server echo)");
               this.resume(client);
             }
           }
         })
         .catch((err: unknown) => {
-          console.error("[agent] Heartbeat failed:", err);
+          agentLogger.error("[agent] Heartbeat failed: " + String(err));
         });
     };
     beat(); // immediate first beat
@@ -211,7 +212,7 @@ export class Scheduler {
       await this.scrapeAll(client, config, jobMap, trigger);
     } catch (err) {
       const errMsg = String(err);
-      console.error("[agent] Scrape cycle failed:", errMsg);
+      agentLogger.error("[agent] Scrape cycle failed: " + errMsg);
       Promise.resolve(client.heartbeat(this._version, process.platform, {
         schedulerPaused: this._paused,
         activeJobId: this._activeJobId,
@@ -225,7 +226,7 @@ export class Scheduler {
     // Only schedule the next run if not paused
     if (scheduleNext && !this._paused) {
       this.nextRunAt = Date.now() + intervalMs;
-      console.log(`[agent] Next scrape in ${Math.round(intervalMs / 60000)} min`);
+      agentLogger.info(`[agent] Next scrape in ${Math.round(intervalMs / 60000)} min`);
       this.scrapeTimer = setTimeout(() => void this.runCycle(client, true, "schedule"), intervalMs);
     }
   }
@@ -240,19 +241,19 @@ export class Scheduler {
     const enabled = Object.entries(modules).filter(([, m]) => m.enabled);
 
     if (enabled.length === 0) {
-      console.log("[agent] No modules enabled — nothing to scrape");
+      agentLogger.info("[agent] No modules enabled — nothing to scrape");
       return;
     }
 
     const triggerLabel =
-      trigger === "startup" ? "startup"
+      trigger === "startup"  ? "startup"
       : trigger === "schedule" ? "scheduled"
-      : trigger === "manual" ? "manual (agent UI)"
-      : trigger === "server" ? "server command"
+      : trigger === "manual"   ? "manual (agent UI)"
+      : trigger === "server"   ? "server command"
       : "resume";
 
     const startedAt = new Date().toLocaleTimeString();
-    console.log(`[agent] ──────────── Scrape started @ ${startedAt} [${triggerLabel}] ────────────`);
+    agentLogger.info(`[agent] ──────────── Scrape started @ ${startedAt} [${triggerLabel}] ────────────`);
 
     const browserOptions = config.browser
       ? { headless: config.browser.headless ?? true, timeout: config.browser.timeout }
@@ -263,21 +264,21 @@ export class Scheduler {
     for (const [moduleName, moduleConfig] of enabled) {
       if (this._stopRequested) {
         this._stopRequested = false;
-        console.log("[agent] ──────────── Scrape halted by user request ────────────");
+        agentLogger.info("[agent] ──────────── Scrape halted by user request ────────────");
         const cancelIds = [...jobMap.values()].filter((id) => !startedJobIds.has(id));
         client.cancelJobs(cancelIds).catch((err: unknown) => {
-          console.warn("[agent] Failed to cancel skipped jobs:", err);
+          agentLogger.warn("[agent] Failed to cancel skipped jobs: " + String(err));
         });
         break;
       }
-      console.log(`[agent] Scraping ${moduleName}...`);
+      agentLogger.info(`[agent] Scraping ${moduleName}...`);
       const moduleStartedAt = new Date();
       const jobId = jobMap.get(moduleName);
       if (jobId !== undefined) {
         startedJobIds.add(jobId);
         this._activeJobId = jobId;
         await client.startJob(jobId, moduleStartedAt.toISOString()).catch((err: unknown) => {
-          console.warn(`[agent] Failed to mark job ${jobId} as running:`, err);
+          agentLogger.warn(`[agent] Failed to mark job ${jobId} as running: ` + String(err));
         });
       }
       try {
@@ -288,7 +289,7 @@ export class Scheduler {
         // Retry once immediately with the fresh profile instead of waiting
         // until the next scheduled cycle.
         if (result.hadManagedChallenge) {
-          console.log(`[agent] Retrying ${moduleName} with fresh browser profile…`);
+          agentLogger.info(`[agent] Retrying ${moduleName} with fresh browser profile…`);
           // Preserve snapshots from the original (failed) run so the dashboard
           // can show what Cloudflare returned, even if the retry succeeds.
           const originalSnapshots = result.debugSnapshots.map((s) => ({ ...s, preRetry: true }));
@@ -296,6 +297,9 @@ export class Scheduler {
           wasRetried = true;
           result = { ...result, debugSnapshots: [...originalSnapshots, ...result.debugSnapshots] };
         }
+
+        // Push scraper module logs into the Scraper tab buffer.
+        pushScraperLogs(moduleName, result.logs);
 
         const response = await client.pushResults({
           moduleName,
@@ -310,7 +314,7 @@ export class Scheduler {
         });
         this._activeJobId = null;
         const s = response.summary;
-        console.log(
+        agentLogger.info(
           `[agent] ${moduleName}: total=${s.total} new=${s.new} changed=${s.changed} removed=${s.removed}`,
         );
       } catch (err) {
@@ -318,9 +322,9 @@ export class Scheduler {
         const errMsg = String(err);
         const isRateLimited = errMsg.includes("Rate limited (429)");
         if (isRateLimited) {
-          console.warn(`[agent] Rate limited by server — results not delivered for ${moduleName}. Will retry next scheduled run.`);
+          agentLogger.warn(`[agent] Rate limited by server — results not delivered for ${moduleName}. Will retry next scheduled run.`);
         } else {
-          console.error(`[agent] Failed to scrape/push ${moduleName}:`, err);
+          agentLogger.error(`[agent] Failed to scrape/push ${moduleName}: ` + errMsg);
         }
         Promise.resolve(client.heartbeat(this._version, process.platform, {
           schedulerPaused: this._paused,
@@ -332,6 +336,6 @@ export class Scheduler {
     }
 
     const finishedAt = new Date().toLocaleTimeString();
-    console.log(`[agent] ──────────── Scrape complete @ ${finishedAt} ────────────`);
+    agentLogger.info(`[agent] ──────────── Scrape complete @ ${finishedAt} ────────────`);
   }
 }
