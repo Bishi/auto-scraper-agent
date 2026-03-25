@@ -22,6 +22,8 @@ export class Scheduler {
   private _pausedRemainingMs: number | null = null;
   /** Outstanding pause/resume command id to ack on the next heartbeat(s) until the server clears pending. */
   private _pendingAckCommandId: string | null = null;
+  /** Job ID currently being scraped, or null when idle. Sent in every heartbeat for server reconciliation. */
+  private _activeJobId: number | null = null;
   /** True while a scrape cycle is actively executing. */
   get isRunning(): boolean { return this._running; }
   /** True when the scheduler is paused (heartbeat continues but scrapes are suspended). */
@@ -108,6 +110,7 @@ export class Scheduler {
       client
         .heartbeat(this._version, process.platform, {
           schedulerPaused: this._paused,
+          activeJobId: this._activeJobId,
           ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
         })
         .then((res) => {
@@ -265,6 +268,7 @@ export class Scheduler {
       const jobId = jobMap.get(moduleName);
       if (jobId !== undefined) {
         startedJobIds.add(jobId);
+        this._activeJobId = jobId;
         await client.startJob(jobId, moduleStartedAt.toISOString()).catch((err: unknown) => {
           console.warn(`[agent] Failed to mark job ${jobId} as running:`, err);
         });
@@ -297,15 +301,18 @@ export class Scheduler {
           debugSnapshots: result.debugSnapshots,
           startedAt: moduleStartedAt.toISOString(),
         });
+        this._activeJobId = null;
         const s = response.summary;
         console.log(
           `[agent] ${moduleName}: total=${s.total} new=${s.new} changed=${s.changed} removed=${s.removed}`,
         );
       } catch (err) {
+        this._activeJobId = null;
         console.error(`[agent] Failed to scrape/push ${moduleName}:`, err);
         client
           .heartbeat(this._version, process.platform, {
             schedulerPaused: this._paused,
+            activeJobId: this._activeJobId,
             ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
             failureMsg: String(err),
           })

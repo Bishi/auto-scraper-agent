@@ -97,6 +97,7 @@ export class AgentApiClient {
     opts?: {
       failureMsg?: string;
       schedulerPaused: boolean;
+      activeJobId?: number | null;
       ackCommandId?: string;
     },
   ): Promise<HeartbeatResponse> {
@@ -106,6 +107,7 @@ export class AgentApiClient {
       schedulerPaused: opts?.schedulerPaused ?? false,
     };
     if (opts?.failureMsg) body.failureMsg = opts.failureMsg;
+    if ("activeJobId" in (opts ?? {})) body.activeJobId = opts?.activeJobId ?? null;
     if (opts?.ackCommandId) body.ackCommandId = opts.ackCommandId;
     return this.request<HeartbeatResponse>("/api/agent/heartbeat", {
       method: "POST",
