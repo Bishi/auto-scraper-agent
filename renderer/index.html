@@ -187,6 +187,21 @@
       button.danger:hover    { background: #450a0a; }
       button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 
+      button.secondary {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        background: transparent;
+        color: #94a3b8;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+      }
+      button.secondary:hover    { background: #1e293b; color: #e2e8f0; }
+      button.secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
       .section-divider {
         margin: 18px 0 12px;
         border: none;
@@ -333,6 +348,11 @@
           <button class="run"  id="run-scrape-settings-btn" style="flex:1;padding:8px">▶ Run Scrape</button>
           <button class="stop" id="stop-scrape-settings-btn" style="flex:1;padding:8px" disabled>⏹ Stop Scrape</button>
         </div>
+
+        <hr class="section-divider" />
+        <div class="section-label">Updates</div>
+        <button class="secondary" id="check-update-btn">↑ Check for Updates</button>
+        <div class="alert success" id="check-update-uptodate">You're on the latest version.</div>
 
         <hr class="section-divider" />
         <div class="section-label">Troubleshooting</div>
@@ -727,6 +747,48 @@
 
       pollUpdateVersion();
       setInterval(pollUpdateVersion, 15 * 1000); // re-check every 15 s (Tauri command reads a mutex — essentially free)
+
+      // ── Check for Updates (Settings tab) ───────────────────────────────────
+      const checkUpdateBtn      = document.getElementById("check-update-btn");
+      const checkUpdateUptodate = document.getElementById("check-update-uptodate");
+
+      checkUpdateBtn.addEventListener("click", async () => {
+        checkUpdateUptodate.style.display = "none";
+        checkUpdateBtn.disabled    = true;
+        checkUpdateBtn.textContent = "Checking…";
+
+        // Fires install_update: if an update is found it sets AVAILABLE_UPDATE and
+        // shows the download dialog. If already on latest it clears the badge silently.
+        invoke("install_update").catch(() => {});
+
+        // Poll get_update_version for up to 20 s (GitHub API can be slow).
+        // If we get a version back the install dialog has already taken over — just
+        // refresh the badge and restore the button. If we get null → up to date.
+        let waited = 0;
+        const poll = setInterval(async () => {
+          waited += 2000;
+          try {
+            const tag = await invoke("get_update_version");
+            if (tag) {
+              // Install flow is handling it — refresh badge and bail
+              clearInterval(poll);
+              availableTag = tag;
+              updateVersion.textContent = tag;
+              updateBadge.style.display = "flex";
+              checkUpdateBtn.disabled    = false;
+              checkUpdateBtn.textContent = "↑ Check for Updates";
+            } else if (waited >= 20000) {
+              // Timed out waiting — treat as up to date
+              clearInterval(poll);
+              checkUpdateUptodate.style.display = "block";
+              checkUpdateBtn.disabled    = false;
+              checkUpdateBtn.textContent = "↑ Check for Updates";
+            }
+          } catch {
+            // ignore transient errors during poll
+          }
+        }, 2000);
+      });
 
       // ── Run Scrape (Settings tab) ───────────────────────────────────────────
       const runScrapeSettingsBtn = document.getElementById("run-scrape-settings-btn");
