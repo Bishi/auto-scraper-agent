@@ -212,12 +212,12 @@ export class Scheduler {
     } catch (err) {
       const errMsg = String(err);
       console.error("[agent] Scrape cycle failed:", errMsg);
-      client.heartbeat(this._version, process.platform, {
+      Promise.resolve(client.heartbeat(this._version, process.platform, {
         schedulerPaused: this._paused,
         activeJobId: this._activeJobId,
         ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
         failureMsg: errMsg,
-      }).catch(() => {});
+      })).catch(() => {});
     } finally {
       this._running = false;
     }
@@ -322,14 +322,12 @@ export class Scheduler {
         } else {
           console.error(`[agent] Failed to scrape/push ${moduleName}:`, err);
         }
-        client
-          .heartbeat(this._version, process.platform, {
-            schedulerPaused: this._paused,
-            activeJobId: this._activeJobId,
-            ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
-            failureMsg: errMsg,
-          })
-          .catch(() => {});
+        Promise.resolve(client.heartbeat(this._version, process.platform, {
+          schedulerPaused: this._paused,
+          activeJobId: this._activeJobId,
+          ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
+          failureMsg: errMsg,
+        })).catch(() => {});
       }
     }
 
