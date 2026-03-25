@@ -517,6 +517,7 @@
 
       let localLogs  = [];   // displayed entries
       let autoScroll = true; // follow tail unless user scrolled up
+      let lastLogKey = "";   // fingerprint of last render — skip re-render if unchanged
 
       logBox.addEventListener("scroll", () => {
         const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
@@ -532,10 +533,17 @@
 
       function renderLogs() {
         if (localLogs.length === 0) {
+          lastLogKey = "";
           logBox.innerHTML = '<div class="log-empty">No logs yet.</div>';
           logCount.textContent = "0 entries";
           return;
         }
+        // Build a cheap fingerprint (count + last ts) — avoid re-rendering and
+        // destroying the user's text selection when nothing has changed.
+        const newKey = `${localLogs.length}:${localLogs[localLogs.length - 1].ts}`;
+        if (newKey === lastLogKey) return;
+        lastLogKey = newKey;
+
         logBox.innerHTML = localLogs
           .map((e) => {
             // Use local time (respects CET/user timezone) instead of slicing the UTC ISO string
