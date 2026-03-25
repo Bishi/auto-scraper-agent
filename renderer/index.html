@@ -276,12 +276,18 @@
         cursor: text;
       }
 
-      .log-entry       { display: flex; gap: 10px; }
-      .log-ts          { color: #475569; flex-shrink: 0; }
-      .log-entry.info  .log-msg { color: #cbd5e1; }
-      .log-entry.warn  .log-msg { color: #fbbf24; }
-      .log-entry.error .log-msg { color: #f87171; }
-      .log-msg         { word-break: break-all; white-space: pre-wrap; }
+      /* Inline spans (not flex) so copy-paste produces one line per entry */
+      .log-entry        { display: block; padding: 1px 0 1px 8px; white-space: pre-wrap; word-break: break-all; }
+      .log-entry.warn   { border-left: 2px solid #78350f; margin-left: -8px; background: rgba(251,191,36,0.04); }
+      .log-entry.error  { border-left: 2px solid #7f1d1d; margin-left: -8px; background: rgba(248,113,113,0.05); }
+      .log-ts           { color: #334155; }
+      .log-level        { display: inline-block; width: 3ch; margin: 0 8px; font-weight: 600; }
+      .log-entry.info   .log-level { color: #475569; }
+      .log-entry.warn   .log-level { color: #fbbf24; }
+      .log-entry.error  .log-level { color: #f87171; }
+      .log-entry.info   .log-msg { color: #cbd5e1; }
+      .log-entry.warn   .log-msg { color: #fde68a; }
+      .log-entry.error  .log-msg { color: #fca5a5; }
 
       .log-empty { color: #334155; font-style: italic; padding: 4px 0; }
 
@@ -571,8 +577,10 @@
             const ts = new Date(e.ts).toLocaleTimeString(undefined, {
               hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
             });
+            const lvl = e.level === "error" ? "ERR" : e.level === "warn" ? "WRN" : "INF";
             return `<div class="log-entry ${e.level}">` +
               `<span class="log-ts">${ts}</span>` +
+              `<span class="log-level">${lvl}</span>` +
               `<span class="log-msg">${esc(e.msg)}</span>` +
               `</div>`;
           })
