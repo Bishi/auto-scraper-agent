@@ -22,19 +22,19 @@ You are solely responsible for lawful use and for complying with each target sit
 
 ### First launch
 
-After installing, the agent window opens automatically to the **Settings** tab. Enter your Server URL and API key (from the dashboard under **Settings → API**) and click Save. The agent saves these to `~/.auto-scraper/agent.json` and starts the scheduler immediately. On all subsequent launches the window opens on the **Logs** tab instead — no re-entry needed.
+After installing, the agent window opens automatically to the **Settings** tab. Enter your Server URL and API key (from the dashboard under **Settings → API**) and click Save. The agent saves these to `~/.auto-scraper/agent.json` and starts the scheduler immediately. On all subsequent launches the window opens on the **Agent** tab instead — no re-entry needed.
 
 ### Tray icon
 
 The agent lives in your system tray. Hover over it to see the next scheduled scrape time (updates every 30 seconds, shows "scraping now…" during a run).
 
-**Left-click** — opens the agent window (Logs tab when configured, Settings tab otherwise).
+**Left-click** — opens the agent window (Agent tab when configured, Settings tab otherwise).
 
 **Right-click** menu:
 
 | Item | What it does |
 |------|-------------|
-| Run Now | Triggers an immediate scrape and opens the Logs tab so you can watch progress |
+| Run Now | Triggers an immediate scrape and opens the Agent tab so you can watch progress |
 | Open Dashboard | Opens your server's dashboard in the browser |
 | Settings / Setup | Opens the agent window on the Settings tab to update credentials |
 | Check for Updates | Checks GitHub for a newer version and prompts to download and install |
