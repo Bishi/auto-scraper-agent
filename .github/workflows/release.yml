@@ -45,6 +45,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Shared key lets tag builds reuse the cache from the preceding push
+          # on the same Cargo.lock, avoiding a full recompile on every release.
+          shared-key: "tauri-windows"
+          cache-on-failure: true
 
       # -----------------------------------------------------------------------
       # Node dependencies

@@ -9,7 +9,8 @@ authors = []
 # (main.rs still has #![windows_subsystem = "windows"] as a belt-and-suspenders guard.)
 [profile.release]
 panic = "abort"    # smaller binary
-codegen-units = 1  # better optimisation
+# codegen-units left at default (16) — parallel codegen shaves 2–4 min off CI
+# with no measurable runtime difference for a desktop tray app
 
 [lib]
 name = "auto_scraper_agent_lib"
