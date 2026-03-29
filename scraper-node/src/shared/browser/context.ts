@@ -32,6 +32,7 @@ import EvasionWebglVendor           from "puppeteer-extra-plugin-stealth/evasion
 import EvasionWindowOuterdimensions from "puppeteer-extra-plugin-stealth/evasions/window.outerdimensions/index.js";
 import playwright from "playwright";
 import type { BrowserContext, Page } from "playwright";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { AppConfig } from "../config.js";
@@ -90,6 +91,7 @@ export type BrowserConfig = AppConfig["browser"] & {
 
 export class BrowserManager {
   private context: BrowserContext | null = null;
+  private browserPid: number | null = null;
 
   constructor(private config: BrowserConfig) {}
 
@@ -106,6 +108,12 @@ export class BrowserManager {
       args: ["--disable-blink-features=AutomationControlled"],
     });
 
+    // Playwright's Browser type doesn't expose process() in its public typings,
+    // but the underlying object does have it at runtime for locally-launched browsers.
+    const browser = this.context.browser() as
+      | (ReturnType<BrowserContext["browser"]> & { process?(): { pid?: number } })
+      | null;
+    this.browserPid = browser?.process?.()?.pid ?? null;
     this.context.setDefaultTimeout(this.config.timeout);
 
     // Inject fingerprint fixes directly on the context so they apply to every
@@ -164,7 +172,28 @@ export class BrowserManager {
   }
 
   async close(): Promise<void> {
-    await this.context?.close();
+    if (!this.context) return;
+
+    const ctx = this.context;
+    const pid = this.browserPid;
     this.context = null;
+    this.browserPid = null;
+
+    try {
+      await Promise.race([
+        ctx.close(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("browser.close() timed out after 10s")), 10_000)
+        ),
+      ]);
+    } catch {
+      if (pid) {
+        if (process.platform === "win32") {
+          try { execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" }); } catch { /* already gone */ }
+        } else {
+          try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+        }
+      }
+    }
   }
 }
