@@ -214,6 +214,14 @@ export class Scheduler {
           // Keep the Realtime watcher's dedupe state in sync so it doesn't
           // fire a spurious immediate heartbeat for a command we just picked up.
           this.realtimeWatcher?.seedCommandId(res.commandId ?? null);
+
+          // If this beat just set a pending ACK, fire a follow-up beat after a
+          // short delay so the ACK reaches the server in ~500 ms rather than
+          // waiting up to 60 s for the next scheduled heartbeat. This clears
+          // "Pausing…" / "Resuming…" on the dashboard almost immediately.
+          if (this._pendingAckCommandId === res.commandId && res.commandId) {
+            setTimeout(() => beat(), 500);
+          }
         })
         .catch((err: unknown) => {
           agentLogger.error("[agent] Heartbeat failed: " + String(err));

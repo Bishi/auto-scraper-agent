@@ -278,12 +278,12 @@
         cursor: text;
       }
 
-      .log-entry        { display: grid; grid-template-columns: 8ch 4ch minmax(0, 1fr); column-gap: 8px; align-items: start; padding: 1px 0 1px 8px; }
+      .log-entry        { display: block; padding: 1px 0 1px 8px; }
       .log-entry.warn   { border-left: 2px solid #78350f; margin-left: -8px; padding-left: 14px; background: rgba(251,191,36,0.04); }
       .log-entry.error  { border-left: 2px solid #7f1d1d; margin-left: -8px; padding-left: 14px; background: rgba(248,113,113,0.05); }
-      .log-ts           { color: #334155; }
-      .log-level        { display: block; width: 3ch; font-weight: 600; }
-      .log-msg          { min-width: 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+      .log-ts           { display: inline-block; width: 8ch; margin-right: 8px; color: #334155; vertical-align: top; }
+      .log-level        { display: inline-block; width: 4ch; margin-right: 8px; font-weight: 600; vertical-align: top; }
+      .log-msg          { display: inline; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
       .log-entry.info   .log-level { color: #475569; }
       .log-entry.warn   .log-level { color: #fbbf24; }
       .log-entry.error  .log-level { color: #f87171; }
