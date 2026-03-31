@@ -148,6 +148,7 @@
       }
       .alert.error   { background: #450a0a; color: #fca5a5; }
       .alert.success { background: #052e16; color: #86efac; }
+      .alert.info    { background: #0c1a2e; color: #93c5fd; }
 
       /* ── Logs ────────────────────────────────────── */
       .logs-toolbar {
@@ -363,6 +364,7 @@
         <button class="secondary" id="check-update-btn">↑ Check for Updates</button>
         <div class="alert success" id="check-update-uptodate">You're on the latest version.</div>
         <div class="alert error"   id="check-update-error"></div>
+        <div class="alert info"    id="download-progress" style="display:none"></div>
 
         <hr class="section-divider" />
         <div class="section-label">Troubleshooting</div>
@@ -840,6 +842,20 @@
       const checkUpdateBtn      = document.getElementById("check-update-btn");
       const checkUpdateUptodate = document.getElementById("check-update-uptodate");
       const checkUpdateError    = document.getElementById("check-update-error");
+      const downloadProgress    = document.getElementById("download-progress");
+
+      // Poll for download progress every second — shows/hides automatically.
+      setInterval(async () => {
+        try {
+          const progress = await invoke("get_download_progress");
+          if (progress) {
+            downloadProgress.textContent = "⬇ Downloading update: " + progress;
+            downloadProgress.style.display = "block";
+          } else {
+            downloadProgress.style.display = "none";
+          }
+        } catch { /* ignore */ }
+      }, 1000);
 
       checkUpdateBtn.addEventListener("click", async () => {
         checkUpdateUptodate.style.display = "none";
