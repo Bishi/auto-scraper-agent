@@ -362,6 +362,7 @@
         <div class="section-label">Updates</div>
         <button class="secondary" id="check-update-btn">↑ Check for Updates</button>
         <div class="alert success" id="check-update-uptodate">You're on the latest version.</div>
+        <div class="alert error"   id="check-update-error"></div>
 
         <hr class="section-divider" />
         <div class="section-label">Troubleshooting</div>
@@ -838,9 +839,11 @@
       // ── Check for Updates (Settings tab) ───────────────────────────────────
       const checkUpdateBtn      = document.getElementById("check-update-btn");
       const checkUpdateUptodate = document.getElementById("check-update-uptodate");
+      const checkUpdateError    = document.getElementById("check-update-error");
 
       checkUpdateBtn.addEventListener("click", async () => {
         checkUpdateUptodate.style.display = "none";
+        checkUpdateError.style.display    = "none";
         checkUpdateBtn.disabled    = true;
         checkUpdateBtn.textContent = "Checking…";
 
@@ -848,33 +851,35 @@
         // shows the download dialog. If already on latest it clears the badge silently.
         invoke("install_update").catch(() => {});
 
-        // Poll get_update_version for up to 20 s (GitHub API can be slow).
-        // If we get a version back the install dialog has already taken over — just
-        // refresh the badge and restore the button. If we get null → up to date.
-        let waited = 0;
+        // Poll is_update_check_done every 500 ms — stops as soon as Rust signals
+        // the check completed (success or failure), so the button resets immediately
+        // instead of waiting the old 20s timeout.
         const poll = setInterval(async () => {
-          waited += 2000;
           try {
-            const tag = await invoke("get_update_version");
+            const done = await invoke("is_update_check_done");
+            if (!done) return;
+            clearInterval(poll);
+            checkUpdateBtn.disabled    = false;
+            checkUpdateBtn.textContent = "↑ Check for Updates";
+            const [tag, err] = await Promise.all([
+              invoke("get_update_version"),
+              invoke("get_update_check_error"),
+            ]);
             if (tag) {
-              // Install flow is handling it — refresh badge and bail
-              clearInterval(poll);
+              // Update found — install dialog has already taken over, just refresh badge.
               availableTag = tag;
               updateVersion.textContent = tag;
               updateBadge.style.display = "flex";
-              checkUpdateBtn.disabled    = false;
-              checkUpdateBtn.textContent = "↑ Check for Updates";
-            } else if (waited >= 20000) {
-              // Timed out waiting — treat as up to date
-              clearInterval(poll);
+            } else if (err) {
+              checkUpdateError.textContent = "Update check failed: " + err;
+              checkUpdateError.style.display = "block";
+            } else {
               checkUpdateUptodate.style.display = "block";
-              checkUpdateBtn.disabled    = false;
-              checkUpdateBtn.textContent = "↑ Check for Updates";
             }
           } catch {
-            // ignore transient errors during poll
+            // ignore transient invoke errors during poll
           }
-        }, 2000);
+        }, 500);
       });
 
       // ── Run Scrape (Settings tab) ───────────────────────────────────────────
