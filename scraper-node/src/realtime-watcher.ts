@@ -99,9 +99,6 @@ export class RealtimeWatcher {
       return;
     }
 
-    // Token acquired — reset failure counter.
-    this.consecutiveFailures = 0;
-
     // Tear down any existing channel before creating a new one.
     if (this.channel) {
       this.channel.unsubscribe().catch(() => undefined);
@@ -116,6 +113,13 @@ export class RealtimeWatcher {
       realtime: { params: { apikey: this.anonKey } },
     });
     supabase.realtime.setAuth(token);
+
+    // One-shot guard: prevents Supabase's internal retry loop from firing this
+    // callback a second time after we've already handled the error and scheduled
+    // a reconnect. Without this, each internal retry cancels our backoff timer
+    // via clearTimers() and spawns a duplicate connect(), making the cooldown
+    // unreachable and causing the rapid-fire CHANNEL_ERROR spam in the logs.
+    let channelHandled = false;
 
     const channel = supabase
       .channel("agent-commands")
@@ -146,16 +150,25 @@ export class RealtimeWatcher {
       )
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
+          // Only reset failure counter on a real successful connection.
+          this.consecutiveFailures = 0;
           agentLogger.info("[realtime] Subscribed to agent_sessions — instant command delivery active");
           this.scheduleTokenRefresh(expiresAt);
-        } else if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") {
-          agentLogger.warn(`[realtime] Channel ${status} — reconnecting`);
+        } else if ((status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") && !channelHandled) {
+          channelHandled = true;
+          // Unsubscribe immediately so Supabase stops retrying and won't fire
+          // this callback again — that retry loop is what cancels our backoff
+          // timers and prevents the cooldown from ever holding.
+          channel.unsubscribe().catch(() => undefined);
           this.channel = null;
           this.clearTimers();
           if (!this.stopped) {
             const nextAttempt = attempt + 1;
             const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
             this.consecutiveFailures++;
+            agentLogger.warn(
+              `[realtime] Channel ${status} — reconnecting in ${delay / 1000}s (failure ${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`,
+            );
             this.reconnectTimer = setTimeout(() => void this.connect(nextAttempt), delay);
           }
         }
