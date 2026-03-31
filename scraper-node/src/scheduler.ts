@@ -55,6 +55,7 @@ export class Scheduler {
         if (this.realtimeWatcher) return; // already started (shouldn't happen)
         this.realtimeWatcher = new RealtimeWatcher(
           res.supabaseUrl,
+          res.anonKey,
           client,
           () => { this._fireImmediateHeartbeat?.(); },
         );

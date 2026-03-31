@@ -27,6 +27,8 @@ export interface RealtimeTokenResponse {
   /** Unix epoch seconds when the token expires. */
   expiresAt: number;
   supabaseUrl: string;
+  /** Supabase publishable anon key — used as the `createClient` second arg. */
+  anonKey: string;
 }
 
 export interface HeartbeatResponse {

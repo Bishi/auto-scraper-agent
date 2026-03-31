@@ -28,6 +28,7 @@ export class RealtimeWatcher {
 
   constructor(
     private readonly supabaseUrl: string,
+    private readonly anonKey: string,
     private readonly client: AgentApiClient,
     private readonly onCommandHint: () => void,
   ) {}
@@ -107,14 +108,13 @@ export class RealtimeWatcher {
       this.channel = null;
     }
 
-    const supabase = createClient(this.supabaseUrl, token, {
+    // createClient takes the public anon key as the second argument.
+    // The user JWT goes only to setAuth() — passing it as the anon key would
+    // cause the initial WebSocket handshake to fail with CHANNEL_ERROR.
+    const supabase = createClient(this.supabaseUrl, this.anonKey, {
       auth: { persistSession: false, autoRefreshToken: false },
-      realtime: { params: { apikey: token } },
+      realtime: { params: { apikey: this.anonKey } },
     });
-
-    // Supabase Realtime uses the JWT passed to createClient for the initial
-    // connection, but setAuth must also be called so subsequent messages
-    // (after the socket handshake) carry the correct token.
     supabase.realtime.setAuth(token);
 
     const channel = supabase
@@ -153,9 +153,10 @@ export class RealtimeWatcher {
           this.channel = null;
           this.clearTimers();
           if (!this.stopped) {
+            const nextAttempt = attempt + 1;
             const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
             this.consecutiveFailures++;
-            this.reconnectTimer = setTimeout(() => void this.connect(0), delay);
+            this.reconnectTimer = setTimeout(() => void this.connect(nextAttempt), delay);
           }
         }
       });
