@@ -8,6 +8,8 @@ function mockClient(): AgentApiClient {
     getSchedule: vi.fn(),
     pushResults: vi.fn(),
     heartbeat: vi.fn(),
+    // Simulate a server that doesn't support Realtime — watcher falls back to polling silently.
+    getRealtimeToken: vi.fn().mockRejectedValue(new Error("not supported")),
   } as unknown as AgentApiClient;
 }
 
