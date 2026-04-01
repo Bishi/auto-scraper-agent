@@ -7,7 +7,7 @@ const mockState = {
   hasApiKey: true,
   apiKeyTail: "55f4",
   version: "0.6.1-mock",
-  availableUpdate: "v0.6.2",
+  availableUpdate: "v0.6.99",
   updateCheckError: null,
   downloadProgress: "",
   updateCheckDone: false,
