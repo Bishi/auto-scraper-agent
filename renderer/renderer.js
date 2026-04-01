@@ -338,17 +338,41 @@ async function loadConfig() {
 const saveBtn = document.getElementById("save-btn");
 const errorEl = document.getElementById("error-msg");
 const successEl = document.getElementById("success-msg");
+const checkUpdateUptodate = document.getElementById("check-update-uptodate");
+const checkUpdateError = document.getElementById("check-update-error");
+const downloadProgress = document.getElementById("download-progress");
+const clearProfileError = document.getElementById("clear-profile-error");
+const clearProfileSuccess = document.getElementById("clear-profile-success");
+
+const feedbackAlerts = [
+  errorEl,
+  successEl,
+  checkUpdateUptodate,
+  checkUpdateError,
+  clearProfileError,
+  clearProfileSuccess,
+];
+
+function hideAllFeedback() {
+  feedbackAlerts.forEach((el) => {
+    el.style.display = "none";
+  });
+}
+
+function showFeedback(el) {
+  hideAllFeedback();
+  el.style.display = "block";
+}
 
 saveBtn.addEventListener("click", async () => {
-  errorEl.style.display = "none";
-  successEl.style.display = "none";
+  hideAllFeedback();
 
   const serverUrl = serverInput.value.trim();
   const apiKey = keyInput.value.trim();
 
   if (!serverUrl) {
     errorEl.textContent = "Server URL is required.";
-    errorEl.style.display = "block";
+    showFeedback(errorEl);
     return;
   }
 
@@ -357,11 +381,11 @@ saveBtn.addEventListener("click", async () => {
 
   try {
     await invoke("save_config", { apiKey, serverUrl });
-    successEl.style.display = "block";
+    showFeedback(successEl);
     await loadConfig();
   } catch (err) {
     errorEl.textContent = String(err);
-    errorEl.style.display = "block";
+    showFeedback(errorEl);
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = "Save";
@@ -641,8 +665,6 @@ async function doStopScrape(btn) {
 stopScrapeBtn.addEventListener("click", () => doStopScrape(stopScrapeBtn));
 
 const clearProfileBtn = document.getElementById("clear-profile-btn");
-const clearProfileError = document.getElementById("clear-profile-error");
-const clearProfileSuccess = document.getElementById("clear-profile-success");
 
 function updateRunningState(running) {
   document.getElementById("run-scrape-btn").disabled = running;
@@ -651,22 +673,21 @@ function updateRunningState(running) {
 }
 
 clearProfileBtn.addEventListener("click", async () => {
-  clearProfileError.style.display = "none";
-  clearProfileSuccess.style.display = "none";
+  hideAllFeedback();
   clearProfileBtn.disabled = true;
   clearProfileBtn.textContent = "Clearing...";
   try {
     const res = await fetchTimeout(`${SIDECAR}/clear-profile`, 4000, { method: "POST" });
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      clearProfileSuccess.style.display = "block";
+      showFeedback(clearProfileSuccess);
     } else {
       clearProfileError.textContent = data.error ?? `Error ${res.status}`;
-      clearProfileError.style.display = "block";
+      showFeedback(clearProfileError);
     }
   } catch (err) {
     clearProfileError.textContent = String(err);
-    clearProfileError.style.display = "block";
+    showFeedback(clearProfileError);
   } finally {
     clearProfileBtn.disabled = false;
     clearProfileBtn.textContent = "Clear Browser Profile";
@@ -706,15 +727,14 @@ pollUpdateVersion();
 setInterval(pollUpdateVersion, 15 * 1000);
 
 const checkUpdateBtn = document.getElementById("check-update-btn");
-const checkUpdateUptodate = document.getElementById("check-update-uptodate");
-const checkUpdateError = document.getElementById("check-update-error");
-const downloadProgress = document.getElementById("download-progress");
 const downloadProgressText = document.getElementById("download-progress-text");
 const downloadProgressFill = document.getElementById("download-progress-fill");
 
 function renderDownloadProgress(progress) {
   if (!progress) {
-    downloadProgress.style.display = "none";
+    if (downloadProgress.style.display !== "none") {
+      downloadProgress.style.display = "none";
+    }
     downloadProgressText.textContent = "";
     downloadProgressFill.style.width = "0%";
     return;
@@ -734,8 +754,7 @@ setInterval(async () => {
 }, 1000);
 
 checkUpdateBtn.addEventListener("click", async () => {
-  checkUpdateUptodate.style.display = "none";
-  checkUpdateError.style.display = "none";
+  hideAllFeedback();
   checkUpdateBtn.disabled = true;
   checkUpdateBtn.textContent = "Checking...";
 
@@ -758,9 +777,9 @@ checkUpdateBtn.addEventListener("click", async () => {
         updateBadge.style.display = "inline-flex";
       } else if (err) {
         checkUpdateError.textContent = "Update check failed: " + err;
-        checkUpdateError.style.display = "block";
+        showFeedback(checkUpdateError);
       } else {
-        checkUpdateUptodate.style.display = "block";
+        showFeedback(checkUpdateUptodate);
       }
     } catch {}
   }, 500);
