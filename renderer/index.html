@@ -1,918 +1,156 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Auto-Scraper Agent</title>
-    <style>
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        background: #0f172a;
-        color: #e2e8f0;
-        height: 100vh;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-      }
-
-      /* ── Header ─────────────────────────────────── */
-      .header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 16px 20px 0;
-        flex-shrink: 0;
-      }
-
-      .header h1 { font-size: 17px; font-weight: 600; }
-
-      .version-badge {
-        font-size: 11px;
-        color: #475569;
-        background: #1e293b;
-        padding: 2px 7px;
-        border-radius: 10px;
-        flex-shrink: 0;
-      }
-
-      .status-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #475569;
-        flex-shrink: 0;
-        transition: background 0.3s;
-      }
-      .status-dot.online  { background: #22c55e; }
-      .status-dot.offline { background: #ef4444; }
-
-      .status-text { font-size: 12px; color: #64748b; }
-      .schedule-text { font-size: 12px; color: #475569; }
-
-      /* ── Tabs ────────────────────────────────────── */
-      .tabs {
-        display: flex;
-        padding: 12px 20px 0;
-        border-bottom: 1px solid #1e293b;
-        margin-top: 8px;
-        flex-shrink: 0;
-      }
-
-      .tab {
-        padding: 8px 16px;
-        font-size: 13px;
-        font-weight: 500;
-        color: #64748b;
-        cursor: pointer;
-        border-bottom: 2px solid transparent;
-        margin-bottom: -1px;
-        user-select: none;
-        transition: color 0.15s;
-      }
-      .tab.active          { color: #e2e8f0; border-bottom-color: #6366f1; }
-      .tab:hover:not(.active) { color: #94a3b8; }
-
-      /* ── Content area ────────────────────────────── */
-      .content {
-        flex: 1;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-      }
-
-      .panel { display: none; flex: 1; flex-direction: column; min-height: 0; }
-      .panel.active { display: flex; }
-
-      /* Settings panel scrolls normally */
-      #panel-settings.active { overflow-y: auto; padding: 20px; }
-
-      /* Logs panels — log-box gets the scroll */
-      #panel-logs.active, #panel-scraper.active { overflow: hidden; padding: 16px 20px; }
-
-      /* ── Form ────────────────────────────────────── */
-      .field { margin-bottom: 16px; }
-
-      label {
-        display: block;
-        font-size: 13px;
-        font-weight: 500;
-        color: #cbd5e1;
-        margin-bottom: 5px;
-      }
-
-      input[type="url"],
-      input[type="password"],
-      input[type="text"] {
-        width: 100%;
-        padding: 8px 12px;
-        border: 1px solid #334155;
-        border-radius: 6px;
-        background: #1e293b;
-        color: #f1f5f9;
-        font-size: 14px;
-        outline: none;
-        transition: border-color 0.15s;
-      }
-      input:focus { border-color: #6366f1; }
-
-      .hint {
-        margin-top: 4px;
-        font-size: 12px;
-        color: #64748b;
-      }
-
-      button.primary {
-        width: 100%;
-        padding: 10px;
-        border: none;
-        border-radius: 6px;
-        background: #6366f1;
-        color: #fff;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background 0.15s;
-      }
-      button.primary:hover    { background: #4f46e5; }
-      button.primary:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
-
-      .alert {
-        margin-top: 12px;
-        padding: 8px 12px;
-        border-radius: 6px;
-        font-size: 13px;
-        display: none;
-      }
-      .alert.error   { background: #450a0a; color: #fca5a5; }
-      .alert.success { background: #052e16; color: #86efac; }
-      .alert.info    { background: #0c1a2e; color: #93c5fd; }
-
-      /* ── Logs ────────────────────────────────────── */
-      .logs-toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        min-height: 28px;
-        margin-bottom: 8px;
-        flex-shrink: 0;
-      }
-
-      .logs-toolbar span { font-size: 12px; color: #64748b; }
-
-      button.ghost {
-        padding: 4px 10px;
-        border: 1px solid #334155;
-        border-radius: 4px;
-        background: transparent;
-        color: #94a3b8;
-        font-size: 12px;
-        cursor: pointer;
-        transition: background 0.15s, color 0.15s;
-      }
-      button.ghost:hover { background: #1e293b; color: #e2e8f0; }
-
-      button.danger {
-        width: 100%;
-        padding: 8px;
-        border: 1px solid #7f1d1d;
-        border-radius: 6px;
-        background: #1c0a0a;
-        color: #fca5a5;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background 0.15s;
-      }
-      button.danger:hover    { background: #450a0a; }
-      button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
-
-      button.secondary {
-        width: 100%;
-        padding: 8px;
-        border: 1px solid #334155;
-        border-radius: 6px;
-        background: transparent;
-        color: #94a3b8;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background 0.15s, color 0.15s;
-      }
-      button.secondary:hover    { background: #1e293b; color: #e2e8f0; }
-      button.secondary:disabled { opacity: 0.4; cursor: not-allowed; }
-
-      .section-divider {
-        margin: 18px 0 12px;
-        border: none;
-        border-top: 1px solid #1e293b;
-      }
-      .section-label {
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: #475569;
-        margin-bottom: 8px;
-      }
-
-      button.run {
-        padding: 4px 12px;
-        min-width: 96px;
-        border: 1px solid #166534;
-        border-radius: 4px;
-        background: #052e16;
-        color: #86efac;
-        font-size: 12px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background 0.15s;
-      }
-      button.run:hover    { background: #14532d; }
-      button.run:disabled { opacity: 0.5; cursor: not-allowed; }
-
-      button.stop {
-        padding: 4px 12px;
-        border: 1px solid #7f1d1d;
-        border-radius: 4px;
-        background: #1c0a0a;
-        color: #fca5a5;
-        font-size: 12px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background 0.15s;
-      }
-      button.stop:hover    { background: #450a0a; }
-      button.stop:disabled { opacity: 0.35; cursor: not-allowed; }
-
-      button.pause {
-        padding: 3px 10px;
-        border: 1px solid #334155;
-        border-radius: 4px;
-        background: #0f172a;
-        color: #94a3b8;
-        font-size: 11px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background 0.15s, color 0.15s;
-        flex-shrink: 0;
-      }
-      button.pause:hover { background: #1e293b; color: #e2e8f0; }
-      button.pause.paused { border-color: #166534; background: #052e16; color: #86efac; }
-
-      .log-box {
-        flex: 1;
-        background: #020617;
-        border: 1px solid #1e293b;
-        border-radius: 6px;
-        padding: 10px 12px;
-        overflow-y: auto;
-        font-family: "Consolas", "Cascadia Code", "Fira Mono", monospace;
-        font-size: 12px;
-        line-height: 1.6;
-        min-height: 0;
-        user-select: text;
-        -webkit-user-select: text;
-        cursor: text;
-      }
-
-      .log-entry        { display: block; padding: 1px 0 1px 8px; }
-      .log-entry.warn   { border-left: 2px solid #78350f; margin-left: -8px; padding-left: 14px; background: rgba(251,191,36,0.04); }
-      .log-entry.error  { border-left: 2px solid #7f1d1d; margin-left: -8px; padding-left: 14px; background: rgba(248,113,113,0.05); }
-      .log-ts           { display: inline-block; width: 8ch; color: #334155; vertical-align: top; }
-      .log-level        { display: inline-block; width: 4ch; font-weight: 600; vertical-align: top; }
-      .log-msg          { display: inline; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
-      .log-entry.info   .log-level { color: #475569; }
-      .log-entry.warn   .log-level { color: #fbbf24; }
-      .log-entry.error  .log-level { color: #f87171; }
-      .log-entry.info   .log-msg { color: #cbd5e1; }
-      .log-entry.warn   .log-msg { color: #fde68a; }
-      .log-entry.error  .log-msg { color: #fca5a5; }
-
-      .log-empty { color: #334155; font-style: italic; padding: 4px 0; }
-
-      /* ── Update badge ────────────────────────────────── */
-      .update-badge {
-        display: none;
-        align-items: center;
-        gap: 5px;
-        font-size: 11px;
-        font-weight: 500;
-        color: #fbbf24;
-        background: #1c1408;
-        border: 1px solid #78350f;
-        padding: 2px 8px;
-        border-radius: 10px;
-        cursor: pointer;
-        flex-shrink: 0;
-        transition: background 0.15s;
-      }
-      .update-badge:hover { background: #292008; }
-    </style>
-  </head>
-  <body>
-    <div class="header">
-      <h1>Auto-Scraper Agent</h1>
-      <span class="version-badge" id="version-badge"></span>
-      <div class="status-dot" id="dot"></div>
-      <span class="status-text" id="status-text">checking…</span>
-      <span class="schedule-text" id="schedule-text"></span>
-      <button class="update-badge" id="update-badge" title="Click to install update">↑ <span id="update-version"></span></button>
-      <button class="pause" id="pause-btn" style="margin-left:auto">⏸ Pause schedule</button>
-    </div>
-
-    <div class="tabs">
-      <div class="tab active" data-tab="settings">Settings</div>
-      <div class="tab" data-tab="logs">Agent</div>
-      <div class="tab" data-tab="scraper">Scraper</div>
-    </div>
-
-    <div class="content">
-
-      <!-- Settings panel -->
-      <div class="panel active" id="panel-settings">
-        <div class="field">
-          <label for="server-url">Server URL</label>
-          <input id="server-url" type="url"
-            placeholder="https://your-server.vercel.app"
-            autocomplete="off" spellcheck="false" />
-        </div>
-
-        <div class="field">
-          <label for="api-key">API Key</label>
-          <input id="api-key" type="password"
-            placeholder="as_live_…"
-            autocomplete="off" spellcheck="false" />
-          <p class="hint" id="key-hint" style="display:none">
-            A key is already saved. Leave blank to keep it.
-          </p>
-        </div>
-
-        <button class="primary" id="save-btn">Save</button>
-        <div class="alert error"   id="error-msg"></div>
-        <div class="alert success" id="success-msg">Saved! Agent will scrape on schedule.</div>
-
-        <div style="display:flex;gap:8px;margin-top:16px">
-          <button class="run"  id="run-scrape-settings-btn" style="flex:1;padding:8px">▶ Run Scrape</button>
-          <button class="stop" id="stop-scrape-settings-btn" style="flex:1;padding:8px" disabled>⏹ Stop Scrape</button>
-        </div>
-
-        <hr class="section-divider" />
-        <div class="section-label">Updates</div>
-        <button class="secondary" id="check-update-btn">↑ Check for Updates</button>
-        <div class="alert success" id="check-update-uptodate">You're on the latest version.</div>
-        <div class="alert error"   id="check-update-error"></div>
-        <div class="alert info"    id="download-progress" style="display:none"></div>
-
-        <hr class="section-divider" />
-        <div class="section-label">Troubleshooting</div>
-        <button class="danger" id="clear-profile-btn">🗑 Clear Browser Profile</button>
-        <div class="alert error"   id="clear-profile-error"></div>
-        <div class="alert success" id="clear-profile-success">Browser profile cleared — will start fresh on next scrape.</div>
-        <p class="hint" id="clear-profile-hint">Fixes Cloudflare blocks. Only available when no scrape is running.</p>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Auto-Scraper Agent</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#09111c;--bg-1:#0e1726;--bg-2:#131f31;--panel:rgba(14,23,38,.94);--panel-soft:rgba(19,31,49,.94);--border:rgba(123,151,187,.15);--border-hi:rgba(123,151,187,.28);--text:#e7eef8;--text-2:#adc0d8;--text-3:#7890ac;--accent:#6f9ee8;--success:#35b36a;--danger:#d16478;--shadow:0 28px 80px rgba(0,0,0,.45)}
+html,body{min-height:100%}
+body{min-height:100vh;overflow:hidden;background:radial-gradient(ellipse 75% 55% at 50% -10%,rgba(51,89,145,.34) 0%,rgba(9,17,28,0) 68%),linear-gradient(180deg,#0a121e 0%,#08101a 100%);color:var(--text);font-family:Inter,"Segoe UI",sans-serif}
+body::before{content:"";position:fixed;inset:0;background:linear-gradient(rgba(123,151,187,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(123,151,187,.025) 1px,transparent 1px);background-size:64px 64px;pointer-events:none}
+.window{width:100%;height:100vh;background:linear-gradient(180deg,rgba(14,23,38,.98) 0%,rgba(9,17,28,.99) 100%);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
+.titlebar{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;background:rgba(8,13,22,.94);border-bottom:1px solid var(--border);flex-shrink:0}
+.titlebar-left{display:flex;align-items:center;gap:10px;min-width:0}.titlebar-mark{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px rgba(111,158,232,.28)}.titlebar-title{min-width:0;font-size:13px;font-weight:600;letter-spacing:.02em}
+.app{padding:22px 22px 24px;display:flex;flex-direction:column;gap:18px;flex:1;min-height:0}
+.header{display:flex;align-items:start;justify-content:space-between;gap:18px;flex-shrink:0}.header-main{min-width:0}.header-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}.header-title{font-size:32px;font-weight:700;letter-spacing:-.03em;line-height:1.05}
+.version-badge{padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:rgba(19,31,49,.7);font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--text-3)}
+.status-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:var(--text-2);font-size:14px}.online{display:inline-flex;align-items:center;gap:8px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--text-3);box-shadow:0 0 0 0 rgba(53,179,106,.5)}.status-dot.online{background:var(--success);animation:pulse 1.5s ease-in-out infinite}.status-dot.offline{background:var(--danger);animation:none}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(53,179,106,.45)}50%{box-shadow:0 0 0 6px rgba(53,179,106,0)}}
+.toolbar-btn{min-height:42px;padding:0 16px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--border);background:rgba(19,31,49,.72);color:var(--text);font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;border-radius:10px}.toolbar-btn:disabled{opacity:.45;cursor:not-allowed}.toolbar-btn.pause.paused{border-color:rgba(53,179,106,.28);background:linear-gradient(180deg,rgba(23,79,50,.72) 0%,rgba(17,60,39,.92) 100%);color:#a8ebc2}.toolbar-btn.update-badge{display:none;color:#f4d9a2;border-color:rgba(227,176,95,.24);background:linear-gradient(180deg,rgba(78,53,18,.55) 0%,rgba(54,36,12,.74) 100%)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);flex-shrink:0}.tab{position:relative;padding:14px 16px 13px;color:var(--text-3);font-size:14px;font-weight:600;cursor:pointer;user-select:none}.tab.active{color:var(--text)}.tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
+.content{flex:1;min-height:0;display:flex;flex-direction:column}.panel{display:none;min-height:0}.panel.active{display:flex}#panel-settings.active{overflow-y:auto}.settings-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(280px,.9fr);gap:18px}.settings-main,.settings-side,.section-stack{display:grid;gap:18px;align-content:start}.section-stack{flex:1;min-height:0}
+.section{padding:18px;border:1px solid var(--border);background:linear-gradient(180deg,var(--panel) 0%,var(--panel-soft) 100%);min-width:0;border-radius:18px}.section-title{margin-bottom:14px;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2)}
+.field{display:grid;gap:8px}.field+.field{margin-top:18px}label{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-2)}
+input[type="url"],input[type="password"],input[type="text"]{min-height:48px;width:100%;padding:0 14px;border:1px solid var(--border);background:rgba(8,14,23,.72);font-size:15px;color:var(--text);border-radius:10px;outline:none}input[type="url"]:focus,input[type="password"]:focus,input[type="text"]:focus{border-color:rgba(111,158,232,.45);box-shadow:0 0 0 3px rgba(111,158,232,.12)}
+.hint{color:var(--text-3);font-size:13px}.dual-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+button.primary,button.secondary,button.run,button.stop,button.ghost,button.danger{min-height:48px;width:100%;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;transition:opacity .15s ease}button.primary{margin-top:18px;border:1px solid rgba(111,158,232,.24);background:linear-gradient(180deg,#6f9ee8 0%,#5f8fdc 100%);color:#08101a}button.secondary,button.ghost{border:1px solid var(--border);background:rgba(8,14,23,.5);color:var(--text-2)}button.run{border:1px solid rgba(53,179,106,.28);background:linear-gradient(180deg,rgba(23,79,50,.72) 0%,rgba(17,60,39,.92) 100%);color:#a8ebc2}button.stop,button.danger{border:1px solid rgba(209,100,120,.22);background:linear-gradient(180deg,rgba(66,27,39,.55) 0%,rgba(50,21,30,.8) 100%);color:#e4b0bc}
+.alert{margin-top:12px;padding:14px;border-radius:10px;font-size:13px;line-height:1.5;display:none}.alert.success{border:1px solid rgba(53,179,106,.22);background:linear-gradient(180deg,rgba(18,65,42,.75) 0%,rgba(13,47,31,.92) 100%);color:#a6ebc0}.alert.error{border:1px solid rgba(209,100,120,.24);background:linear-gradient(180deg,rgba(66,27,39,.45) 0%,rgba(50,21,30,.74) 100%);color:#f0bcc7}.alert.info{border:1px solid rgba(111,158,232,.2);background:linear-gradient(180deg,rgba(17,43,77,.55) 0%,rgba(13,31,56,.76) 100%);color:#b6d1f2}
+.logs-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-shrink:0}.logs-toolbar span{color:var(--text-2);font-size:14px}
+.log-box{flex:1;min-height:0;overflow-y:auto;padding:14px 16px;border:1px solid var(--border);border-radius:14px;background:linear-gradient(180deg,rgba(7,12,20,.96) 0%,rgba(4,9,17,.98) 100%);font-family:"JetBrains Mono",monospace;font-size:12px;line-height:1.7;user-select:text;-webkit-user-select:text}.log-entry{display:block;padding:2px 0 2px 10px}.log-entry.warn{margin-left:-10px;padding-left:16px;border-left:2px solid rgba(227,176,95,.75);background:rgba(227,176,95,.06)}.log-entry.error{margin-left:-10px;padding-left:16px;border-left:2px solid rgba(209,100,120,.8);background:rgba(209,100,120,.06)}.log-ts{display:inline-block;width:8ch;color:#58708d;vertical-align:top}.log-level{display:inline-block;width:4ch;font-weight:700;vertical-align:top}.log-msg{display:inline;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}.log-entry.info .log-level{color:#8aa2be}.log-entry.warn .log-level{color:#f2c77e}.log-entry.error .log-level{color:#ef9aae}.log-entry.info .log-msg{color:#d5e1ef}.log-entry.warn .log-msg{color:#f6deb0}.log-entry.error .log-msg{color:#f2c1cc}.log-empty{color:#6f86a1;font-style:italic}
+@media (max-width:760px){body{padding:0}.header{flex-direction:column;align-items:stretch}.settings-grid,.dual-actions{grid-template-columns:1fr}.tabs{overflow-x:auto}}
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <div class="titlebar-left">
+        <span class="titlebar-mark"></span>
+        <div class="titlebar-title">Auto-Scraper Agent</div>
       </div>
+    </div>
 
-      <!-- Agent logs panel -->
-      <div class="panel" id="panel-logs">
-        <div class="logs-toolbar">
-          <span id="log-count">0 entries</span>
-          <div style="display:flex;gap:6px">
-            <button class="run"  id="run-scrape-btn">▶ Run Scrape</button>
-            <button class="stop" id="stop-scrape-btn" disabled>⏹ Stop</button>
-            <button class="ghost" id="clear-btn">Clear</button>
+    <div class="app">
+      <div class="header">
+        <div class="header-main">
+          <div class="header-title-row">
+            <div class="header-title">Auto-Scraper Agent</div>
+            <div class="version-badge" id="version-badge"></div>
+          </div>
+          <div class="status-row">
+            <div class="online">
+              <span class="status-dot" id="dot"></span>
+              <span id="status-text">Checking...</span>
+            </div>
+            <span id="status-divider">-</span>
+            <span id="schedule-text"></span>
           </div>
         </div>
-        <div class="log-box" id="log-box">
-          <div class="log-empty">No logs yet.</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button class="toolbar-btn update-badge" id="update-badge" title="Click to install update">Update <span id="update-version"></span></button>
+          <button class="toolbar-btn pause" id="pause-btn">Pause Schedule</button>
         </div>
       </div>
 
-      <!-- Scraper logs panel -->
-      <div class="panel" id="panel-scraper">
-        <div class="logs-toolbar">
-          <span id="scraper-log-count">0 entries</span>
-          <button class="ghost" id="scraper-clear-btn">Clear</button>
-        </div>
-        <div class="log-box" id="scraper-log-box">
-          <div class="log-empty">No scraper logs yet. Logs appear here after a scrape runs.</div>
-        </div>
+      <div class="tabs">
+        <div class="tab active" data-tab="settings">Settings</div>
+        <div class="tab" data-tab="logs">Agent</div>
+        <div class="tab" data-tab="scraper">Scraper</div>
       </div>
 
+      <div class="content">
+        <div class="panel active" id="panel-settings">
+          <div class="settings-grid">
+            <div class="settings-main">
+              <div class="section">
+                <div class="section-title">Connection</div>
+                <div class="field">
+                  <label for="server-url">Server URL</label>
+                  <input id="server-url" type="url" placeholder="https://your-server.vercel.app" autocomplete="off" spellcheck="false" />
+                </div>
+
+                <div class="field">
+                  <label for="api-key">API Key</label>
+                  <input id="api-key" type="password" placeholder="as_live_..." autocomplete="off" spellcheck="false" />
+                  <div class="hint" id="key-hint" style="display:none">A key is already saved. Leave blank to keep it.</div>
+                </div>
+
+                <button class="primary" id="save-btn">Save</button>
+                <div class="alert error" id="error-msg"></div>
+                <div class="alert success" id="success-msg">Saved. Agent will scrape on schedule.</div>
+              </div>
+
+              <div class="section">
+                <div class="section-title">Run Controls</div>
+                <div class="dual-actions">
+                  <button class="run" id="run-scrape-settings-btn">Run Scrape</button>
+                  <button class="stop" id="stop-scrape-settings-btn" disabled>Stop Scrape</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-side">
+              <div class="section">
+                <div class="section-title">Updates</div>
+                <button class="secondary" id="check-update-btn">Check for Updates</button>
+                <div class="alert success" id="check-update-uptodate">You're on the latest version.</div>
+                <div class="alert error" id="check-update-error"></div>
+                <div class="alert info" id="download-progress" style="display:none"></div>
+              </div>
+
+              <div class="section">
+                <div class="section-title">Troubleshooting</div>
+                <button class="danger" id="clear-profile-btn">Clear Browser Profile</button>
+                <div class="alert error" id="clear-profile-error"></div>
+                <div class="alert success" id="clear-profile-success">Browser profile cleared. It will start fresh on the next scrape.</div>
+                <div class="hint" id="clear-profile-hint" style="margin-top:12px">Fixes Cloudflare blocks. Only available when no scrape is running.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-logs">
+          <div class="section section-stack">
+            <div class="logs-toolbar">
+              <span id="log-count">0 entries</span>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="run" id="run-scrape-btn">Run Scrape</button>
+                <button class="stop" id="stop-scrape-btn" disabled>Stop</button>
+                <button class="ghost" id="clear-btn">Clear</button>
+              </div>
+            </div>
+            <div class="log-box" id="log-box">
+              <div class="log-empty">No logs yet.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-scraper">
+          <div class="section section-stack">
+            <div class="logs-toolbar">
+              <span id="scraper-log-count">0 entries</span>
+              <button class="ghost" id="scraper-clear-btn">Clear</button>
+            </div>
+            <div class="log-box" id="scraper-log-box">
+              <div class="log-empty">No scraper logs yet. Logs appear here after a scrape runs.</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-
-    <script>
-      const SIDECAR = "http://127.0.0.1:9001";
-      const { invoke } = window.__TAURI__.core;
-
-      // ── Sidecar token ──────────────────────────────────────────────────────
-      // Ephemeral secret generated by the sidecar on each startup. Captured
-      // from stdout by the Rust watchdog and exposed via get_sidecar_token.
-      // Added to every fetch request as X-Sidecar-Token. Refreshed in
-      // pollHealth() so a sidecar restart (new token) is picked up within 5 s.
-      let sidecarToken = "";
-      invoke("get_sidecar_token").then((t) => { if (t) sidecarToken = t; }).catch(() => {}).finally(() => { loadConfig(); });
-
-      // ── Version badge ──────────────────────────────────────────────────────
-      window.__TAURI__.app.getVersion().then((v) => {
-        document.getElementById("version-badge").textContent = "v" + v;
-      }).catch(() => {});
-
-      // ── Tabs ───────────────────────────────────────────────────────────────
-      function switchTab(name) {
-        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
-        const tabEl = document.querySelector(`.tab[data-tab="${name}"]`);
-        if (tabEl) {
-          tabEl.classList.add("active");
-          document.getElementById("panel-" + name).classList.add("active");
-        }
-      }
-
-      document.querySelectorAll(".tab").forEach((tab) => {
-        tab.addEventListener("click", () => switchTab(tab.dataset.tab));
-      });
-
-      // Honour ?tab= query param (e.g. when opened from tray "Run Now" → tab=logs)
-      const initialTab = new URLSearchParams(window.location.search).get("tab");
-      if (initialTab) switchTab(initialTab);
-
-      // ── Fetch helper with timeout ──────────────────────────────────────────
-      function fetchTimeout(url, ms = 2000, opts = {}) {
-        const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), ms);
-        const headers = { ...(sidecarToken ? { "X-Sidecar-Token": sidecarToken } : {}), ...(opts.headers ?? {}) };
-        return fetch(url, { signal: controller.signal, ...opts, headers }).finally(() => clearTimeout(id));
-      }
-
-      // ── Status dot ─────────────────────────────────────────────────────────
-      const dot        = document.getElementById("dot");
-      const statusText = document.getElementById("status-text");
-
-      async function pollHealth() {
-        try {
-          const res = await fetchTimeout(`${SIDECAR}/health`);
-          if (res.ok) {
-            dot.className       = "status-dot online";
-            statusText.textContent = "Online";
-          } else {
-            dot.className       = "status-dot offline";
-            statusText.textContent = "error " + res.status;
-          }
-        } catch {
-          dot.className       = "status-dot offline";
-          statusText.textContent = "offline";
-        }
-        // Refresh token on every health poll — picks up new token after a sidecar restart.
-        // Only update when a non-null value is returned (don't clear during the restart gap).
-        invoke("get_sidecar_token").then((t) => { if (t) sidecarToken = t; }).catch(() => {});
-      }
-
-      pollHealth();
-      setInterval(pollHealth, 5000);
-
-      // ── Pre-fill settings from saved config ────────────────────────────────
-      const serverInput = document.getElementById("server-url");
-      const keyInput    = document.getElementById("api-key");
-      const keyHint     = document.getElementById("key-hint");
-
-      /** Placeholder when a key is stored — matches admin Fleet: •••• + last 4 chars. */
-      function setSavedKeyPlaceholder(apiKeyTail) {
-        keyInput.value = "";
-        if (typeof apiKeyTail === "string" && apiKeyTail.length >= 4) {
-          keyInput.placeholder = "••••" + apiKeyTail.slice(-4) + "  (saved)";
-        } else {
-          keyInput.placeholder = "••••••••  (saved)";
-        }
-        keyHint.style.display = "block";
-      }
-
-      async function loadConfig() {
-        try {
-          const res = await fetchTimeout(`${SIDECAR}/config`);
-          if (!res.ok) return;
-          const data = await res.json();
-          if (data.serverUrl) serverInput.value = data.serverUrl;
-          if (data.hasApiKey) {
-            setSavedKeyPlaceholder(data.apiKeyTail);
-          } else {
-            keyHint.style.display = "none";
-            keyInput.placeholder = "as_live_…";
-          }
-        } catch { /* sidecar not up yet — silently ignore */ }
-      }
-
-      // ── Save ───────────────────────────────────────────────────────────────
-      const saveBtn   = document.getElementById("save-btn");
-      const errorEl   = document.getElementById("error-msg");
-      const successEl = document.getElementById("success-msg");
-
-      saveBtn.addEventListener("click", async () => {
-        errorEl.style.display   = "none";
-        successEl.style.display = "none";
-
-        const serverUrl = serverInput.value.trim();
-        const apiKey    = keyInput.value.trim();
-
-        if (!serverUrl) {
-          errorEl.textContent   = "Server URL is required.";
-          errorEl.style.display = "block";
-          return;
-        }
-
-        saveBtn.disabled    = true;
-        saveBtn.textContent = "Saving…";
-
-        try {
-          await invoke("save_config", { apiKey, serverUrl });
-          successEl.style.display = "block";
-          // Refresh from sidecar so placeholder shows key tail (Fleet-style) even when key was left blank
-          await loadConfig();
-        } catch (err) {
-          errorEl.textContent   = String(err);
-          errorEl.style.display = "block";
-        } finally {
-          saveBtn.disabled    = false;
-          saveBtn.textContent = "Save";
-        }
-      });
-
-      // ── Run Scrape (Logs tab) ──────────────────────────────────────────────
-      const runScrapeBtn = document.getElementById("run-scrape-btn");
-
-      runScrapeBtn.addEventListener("click", async () => {
-        runScrapeBtn.disabled     = true;
-        runScrapeBtn.textContent  = "Starting…";
-        try {
-          await fetch(`${SIDECAR}/scrape/now`, { method: "POST", headers: { "X-Sidecar-Token": sidecarToken } });
-        } catch { /* fire-and-forget — sidecar logs the result */ }
-        setTimeout(() => {
-          runScrapeBtn.disabled    = false;
-          runScrapeBtn.textContent = "▶ Run Scrape";
-        }, 2000);
-      });
-
-      // ── Logs ───────────────────────────────────────────────────────────────
-      const logBox   = document.getElementById("log-box");
-      const logCount = document.getElementById("log-count");
-      const clearBtn = document.getElementById("clear-btn");
-
-      let localLogs  = [];   // displayed entries
-      let autoScroll = true; // follow tail unless user scrolled up
-      let lastLogKey = "";   // fingerprint of last render — skip re-render if unchanged
-
-      logBox.addEventListener("scroll", () => {
-        const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
-        autoScroll = atBottom;
-      });
-
-      function esc(str) {
-        return str
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
-      }
-
-      function renderLogs() {
-        if (localLogs.length === 0) {
-          lastLogKey = "";
-          logBox.innerHTML = '<div class="log-empty">No logs yet.</div>';
-          logCount.textContent = "0 entries";
-          return;
-        }
-        // Build a cheap fingerprint (count + last ts) — avoid re-rendering and
-        // destroying the user's text selection when nothing has changed.
-        const newKey = `${localLogs.length}:${localLogs[localLogs.length - 1].ts}`;
-        if (newKey === lastLogKey) return;
-        lastLogKey = newKey;
-
-        logBox.innerHTML = localLogs
-          .map((e) => {
-            // Use local time (respects CET/user timezone) instead of slicing the UTC ISO string
-            const ts = new Date(e.ts).toLocaleTimeString(undefined, {
-              hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-            });
-            const lvl = e.level === "error" ? "ERR" : e.level === "warn" ? "WRN" : "INF";
-            const msg = e.msg.replace(/^\[agent\]\s*/, "");
-            return `<div class="log-entry ${e.level}">` +
-              `<span class="log-ts">${ts}</span> ` +
-              `<span class="log-level">${lvl}</span> ` +
-              `<span class="log-msg">${esc(msg)}</span>` +
-              `</div>`;
-          })
-          .join("");
-        logCount.textContent = `${localLogs.length} entries`;
-        if (autoScroll) logBox.scrollTop = logBox.scrollHeight;
-      }
-
-      // Track when logs were last cleared — entries older than this are hidden
-      let clearedAt = 0;
-
-      async function pollLogs() {
-        try {
-          const res = await fetchTimeout(`${SIDECAR}/logs`);
-          if (!res.ok) return;
-          const data = await res.json();
-          const all = data.logs ?? [];
-          // Filter out entries that predate the last clear
-          localLogs = clearedAt ? all.filter((e) => new Date(e.ts).getTime() >= clearedAt) : all;
-          renderLogs();
-        } catch { /* sidecar offline — keep existing display */ }
-      }
-
-      clearBtn.addEventListener("click", () => {
-        clearedAt = Date.now();
-        localLogs = [];
-        renderLogs();
-      });
-
-      pollLogs();
-      setInterval(pollLogs, 3000);
-
-      // ── Scraper logs ────────────────────────────────────────────────────────
-      const scraperLogBox   = document.getElementById("scraper-log-box");
-      const scraperLogCount = document.getElementById("scraper-log-count");
-      const scraperClearBtn = document.getElementById("scraper-clear-btn");
-
-      let scraperLogs        = [];
-      let scraperAutoScroll  = true;
-      let scraperLastKey     = "";
-      let scraperClearedAt   = 0;
-
-      scraperLogBox.addEventListener("scroll", () => {
-        const atBottom = scraperLogBox.scrollHeight - scraperLogBox.scrollTop - scraperLogBox.clientHeight < 40;
-        scraperAutoScroll = atBottom;
-      });
-
-      function renderScraperLogs() {
-        if (scraperLogs.length === 0) {
-          scraperLastKey = "";
-          scraperLogBox.innerHTML = '<div class="log-empty">No scraper logs yet. Logs appear here after a scrape runs.</div>';
-          scraperLogCount.textContent = "0 entries";
-          return;
-        }
-        const newKey = `${scraperLogs.length}:${scraperLogs[scraperLogs.length - 1].ts}`;
-        if (newKey === scraperLastKey) return;
-        scraperLastKey = newKey;
-
-        scraperLogBox.innerHTML = scraperLogs
-          .map((e) => {
-            const ts = new Date(e.ts).toLocaleTimeString(undefined, {
-              hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-            });
-            const lvl = e.level === "error" ? "ERR" : e.level === "warn" ? "WRN" : "INF";
-            const msg = e.msg.replace(/^\[agent\]\s*/, "");
-            return `<div class="log-entry ${e.level}">` +
-              `<span class="log-ts">${ts}</span> ` +
-              `<span class="log-level">${lvl}</span> ` +
-              `<span class="log-msg">${esc(msg)}</span>` +
-              `</div>`;
-          })
-          .join("");
-        scraperLogCount.textContent = `${scraperLogs.length} entries`;
-        if (scraperAutoScroll) scraperLogBox.scrollTop = scraperLogBox.scrollHeight;
-      }
-
-      async function pollScraperLogs() {
-        try {
-          const res = await fetchTimeout(`${SIDECAR}/scraper-logs`);
-          if (!res.ok) return;
-          const data = await res.json();
-          const all = data.logs ?? [];
-          scraperLogs = scraperClearedAt ? all.filter((e) => new Date(e.ts).getTime() >= scraperClearedAt) : all;
-          renderScraperLogs();
-        } catch { /* sidecar offline — keep existing display */ }
-      }
-
-      scraperClearBtn.addEventListener("click", () => {
-        scraperClearedAt = Date.now();
-        scraperLogs = [];
-        renderScraperLogs();
-      });
-
-      pollScraperLogs();
-      setInterval(pollScraperLogs, 3000);
-
-      // ── Schedule / next run time ────────────────────────────────────────────
-      const scheduleText = document.getElementById("schedule-text");
-
-      async function pollSchedule() {
-        try {
-          const res = await fetchTimeout(`${SIDECAR}/schedule`);
-          if (!res.ok) { scheduleText.textContent = ""; return; }
-          const data = await res.json();
-          updatePauseBtn(!!data.paused);
-          updateRunningState(!!data.running);
-          if (data.paused) {
-            scheduleText.textContent = "· paused";
-          } else if (data.running) {
-            scheduleText.textContent = "· Scrape running…";
-          } else if (data.nextRunAt) {
-            const diffMin = Math.max(0, Math.round((data.nextRunAt - Date.now()) / 60000));
-            const nextTime = new Date(data.nextRunAt).toLocaleTimeString(undefined, {
-              hour: "2-digit", minute: "2-digit", hour12: false,
-            });
-            scheduleText.textContent = `· next: ${nextTime} (${diffMin} min)`;
-          } else {
-            scheduleText.textContent = "";
-          }
-        } catch {
-          scheduleText.textContent = "";
-        }
-      }
-
-      pollSchedule();
-      setInterval(pollSchedule, 10000);
-
-      // ── Pause / Resume scheduler ────────────────────────────────────────────
-      const pauseBtn = document.getElementById("pause-btn");
-      let schedulerPaused = false;
-
-      function updatePauseBtn(paused) {
-        schedulerPaused = paused;
-        if (paused) {
-          pauseBtn.textContent = "▶ Resume schedule";
-          pauseBtn.classList.add("paused");
-        } else {
-          pauseBtn.textContent = "⏸ Pause schedule";
-          pauseBtn.classList.remove("paused");
-        }
-      }
-
-      pauseBtn.addEventListener("click", async () => {
-        pauseBtn.disabled = true;
-        try {
-          const endpoint = schedulerPaused ? "/scheduler/resume" : "/scheduler/pause";
-          await fetch(`${SIDECAR}${endpoint}`, { method: "POST", headers: { "X-Sidecar-Token": sidecarToken } });
-          await pollSchedule();
-        } catch { /* ignore */ } finally {
-          pauseBtn.disabled = false;
-        }
-      });
-
-      // ── Stop Scrape ─────────────────────────────────────────────────────────
-      const stopScrapeBtn         = document.getElementById("stop-scrape-btn");
-      const stopScrapeSettingsBtn = document.getElementById("stop-scrape-settings-btn");
-
-      async function doStopScrape(btn) {
-        btn.disabled    = true;
-        btn.textContent = "Stopping…";
-        try {
-          await fetch(`${SIDECAR}/scrape/stop`, { method: "POST", headers: { "X-Sidecar-Token": sidecarToken } });
-        } catch { /* ignore */ }
-        setTimeout(() => { btn.textContent = "⏹ Stop" + (btn.id === "stop-scrape-settings-btn" ? " Scrape" : ""); }, 1500);
-      }
-
-      stopScrapeBtn.addEventListener("click",         () => doStopScrape(stopScrapeBtn));
-      stopScrapeSettingsBtn.addEventListener("click", () => doStopScrape(stopScrapeSettingsBtn));
-
-      // ── Clear browser profile ───────────────────────────────────────────────
-      const clearProfileBtn     = document.getElementById("clear-profile-btn");
-      const clearProfileError   = document.getElementById("clear-profile-error");
-      const clearProfileSuccess = document.getElementById("clear-profile-success");
-
-      // Update all run/stop/clear-profile buttons based on whether a scrape is running
-      function updateRunningState(running) {
-        document.getElementById("run-scrape-btn").disabled          = running;
-        document.getElementById("run-scrape-settings-btn").disabled = running;
-        stopScrapeBtn.disabled         = !running;
-        stopScrapeSettingsBtn.disabled = !running;
-        clearProfileBtn.disabled       = running;
-      }
-
-      clearProfileBtn.addEventListener("click", async () => {
-        clearProfileError.style.display   = "none";
-        clearProfileSuccess.style.display = "none";
-        clearProfileBtn.disabled    = true;
-        clearProfileBtn.textContent = "Clearing…";
-        try {
-          const res  = await fetch(`${SIDECAR}/clear-profile`, { method: "POST", headers: { "X-Sidecar-Token": sidecarToken } });
-          const data = await res.json().catch(() => ({}));
-          if (res.ok) {
-            clearProfileSuccess.style.display = "block";
-          } else {
-            clearProfileError.textContent   = data.error ?? `Error ${res.status}`;
-            clearProfileError.style.display = "block";
-          }
-        } catch (err) {
-          clearProfileError.textContent   = String(err);
-          clearProfileError.style.display = "block";
-        } finally {
-          clearProfileBtn.disabled    = false;
-          clearProfileBtn.textContent = "🗑 Clear Browser Profile";
-        }
-      });
-
-      // ── Update badge ────────────────────────────────────────────────────────
-      const updateBadge   = document.getElementById("update-badge");
-      const updateVersion = document.getElementById("update-version");
-      let availableTag    = null;
-
-      async function pollUpdateVersion() {
-        try {
-          const tag = await invoke("get_update_version");
-          availableTag = tag ?? null;
-          if (availableTag) {
-            updateVersion.textContent = availableTag;
-            updateBadge.style.display = "flex";
-          } else {
-            updateBadge.style.display = "none";
-          }
-        } catch { /* ignore */ }
-      }
-
-      updateBadge.addEventListener("click", async () => {
-        if (!availableTag) return;
-        updateBadge.style.opacity = "0.5";
-        updateBadge.style.pointerEvents = "none";
-        try {
-          await invoke("install_update");
-        } catch { /* ignore — Rust side handles errors */ } finally {
-          // Restore button whether user clicked Yes, No, or dialog was dismissed.
-          updateBadge.style.opacity = "";
-          updateBadge.style.pointerEvents = "";
-        }
-      });
-
-      pollUpdateVersion();
-      setInterval(pollUpdateVersion, 15 * 1000); // re-check every 15 s (Tauri command reads a mutex — essentially free)
-
-      // ── Check for Updates (Settings tab) ───────────────────────────────────
-      const checkUpdateBtn      = document.getElementById("check-update-btn");
-      const checkUpdateUptodate = document.getElementById("check-update-uptodate");
-      const checkUpdateError    = document.getElementById("check-update-error");
-      const downloadProgress    = document.getElementById("download-progress");
-
-      // Poll for download progress every second — shows/hides automatically.
-      setInterval(async () => {
-        try {
-          const progress = await invoke("get_download_progress");
-          if (progress) {
-            downloadProgress.textContent = "⬇ Downloading update: " + progress;
-            downloadProgress.style.display = "block";
-          } else {
-            downloadProgress.style.display = "none";
-          }
-        } catch { /* ignore */ }
-      }, 1000);
-
-      checkUpdateBtn.addEventListener("click", async () => {
-        checkUpdateUptodate.style.display = "none";
-        checkUpdateError.style.display    = "none";
-        checkUpdateBtn.disabled    = true;
-        checkUpdateBtn.textContent = "Checking…";
-
-        // Fires install_update: if an update is found it sets AVAILABLE_UPDATE and
-        // shows the download dialog. If already on latest it clears the badge silently.
-        invoke("install_update").catch(() => {});
-
-        // Poll is_update_check_done every 500 ms — stops as soon as Rust signals
-        // the check completed (success or failure), so the button resets immediately
-        // instead of waiting the old 20s timeout.
-        const poll = setInterval(async () => {
-          try {
-            const done = await invoke("is_update_check_done");
-            if (!done) return;
-            clearInterval(poll);
-            checkUpdateBtn.disabled    = false;
-            checkUpdateBtn.textContent = "↑ Check for Updates";
-            const [tag, err] = await Promise.all([
-              invoke("get_update_version"),
-              invoke("get_update_check_error"),
-            ]);
-            if (tag) {
-              // Update found — install dialog has already taken over, just refresh badge.
-              availableTag = tag;
-              updateVersion.textContent = tag;
-              updateBadge.style.display = "flex";
-            } else if (err) {
-              checkUpdateError.textContent = "Update check failed: " + err;
-              checkUpdateError.style.display = "block";
-            } else {
-              checkUpdateUptodate.style.display = "block";
-            }
-          } catch {
-            // ignore transient invoke errors during poll
-          }
-        }, 500);
-      });
-
-      // ── Run Scrape (Settings tab) ───────────────────────────────────────────
-      const runScrapeSettingsBtn = document.getElementById("run-scrape-settings-btn");
-
-      runScrapeSettingsBtn.addEventListener("click", async () => {
-        runScrapeSettingsBtn.disabled    = true;
-        runScrapeSettingsBtn.textContent = "Starting…";
-        switchTab("logs");
-        try {
-          await fetch(`${SIDECAR}/scrape/now`, { method: "POST", headers: { "X-Sidecar-Token": sidecarToken } });
-        } catch { /* fire-and-forget */ }
-        setTimeout(() => {
-          runScrapeSettingsBtn.disabled    = false;
-          runScrapeSettingsBtn.textContent = "▶ Run Scrape";
-        }, 2000);
-      });
-    </script>
-  </body>
+  </div>
+  <script src="renderer.js"></script>
+</body>
 </html>
