@@ -512,6 +512,11 @@ fn handle_update_available(app: &AppHandle, latest_tag: &str) {
             if want_install {
                 sidecar_log_quick("info", &format!("[agent] Installing update v{version} — agent will restart"));
                 eprintln!("[agent] Launching installer: {}", installer_path.display());
+                // Hide the window before launching so Windows' focus-stealing prevention
+                // doesn't block the installer from appearing in the foreground.
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
                 if let Err(e) = launch_installer_in_foreground(&installer_path) {
                     eprintln!("[agent] Could not launch installer: {e}");
                     UPDATE_IN_PROGRESS.store(false, Ordering::SeqCst);
