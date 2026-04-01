@@ -1,16 +1,52 @@
 const SIDECAR = "http://127.0.0.1:9001";
 const params = new URLSearchParams(window.location.search);
 const isBrowserMock = !window.__TAURI__ || params.get("mock") === "1";
+const mockUpdateMode = params.get("mockUpdate") || "available";
+
+function createInitialMockUpdateState(mode) {
+  if (mode === "none" || mode === "no-update") {
+    return {
+      availableUpdate: null,
+      updateCheckError: null,
+      downloadProgress: "",
+      updateCheckDone: true,
+    };
+  }
+  if (mode === "error") {
+    return {
+      availableUpdate: null,
+      updateCheckError: "Unable to reach release server.",
+      downloadProgress: "",
+      updateCheckDone: true,
+    };
+  }
+  if (mode === "downloading") {
+    return {
+      availableUpdate: "v0.6.99",
+      updateCheckError: null,
+      downloadProgress: "47%",
+      updateCheckDone: false,
+    };
+  }
+  return {
+    availableUpdate: "v0.6.99",
+    updateCheckError: null,
+    downloadProgress: "",
+    updateCheckDone: false,
+  };
+}
+
+const initialMockUpdateState = createInitialMockUpdateState(mockUpdateMode);
 
 const mockState = {
   serverUrl: "https://local.auto-scraper.test",
   hasApiKey: true,
   apiKeyTail: "55f4",
   version: "0.6.1-mock",
-  availableUpdate: "v0.6.99",
-  updateCheckError: null,
-  downloadProgress: "",
-  updateCheckDone: false,
+  availableUpdate: initialMockUpdateState.availableUpdate,
+  updateCheckError: initialMockUpdateState.updateCheckError,
+  downloadProgress: initialMockUpdateState.downloadProgress,
+  updateCheckDone: initialMockUpdateState.updateCheckDone,
   paused: false,
   running: false,
   nextRunAt: Date.now() + 29 * 60 * 1000,
@@ -53,6 +89,8 @@ function startMockScrape() {
 }
 
 function startMockUpdateDownload() {
+  mockState.availableUpdate = "v0.6.99";
+  mockState.updateCheckError = null;
   mockState.updateCheckDone = false;
   mockState.downloadProgress = "12%";
   setTimeout(() => { mockState.downloadProgress = "47%"; }, 600);
@@ -79,7 +117,19 @@ async function mockInvoke(command, args = {}) {
       return mockState.availableUpdate;
     case "install_update":
       mockLog("info", "Update check triggered.");
-      startMockUpdateDownload();
+      if (mockUpdateMode === "none" || mockUpdateMode === "no-update") {
+        mockState.availableUpdate = null;
+        mockState.updateCheckError = null;
+        mockState.downloadProgress = "";
+        mockState.updateCheckDone = true;
+      } else if (mockUpdateMode === "error") {
+        mockState.availableUpdate = null;
+        mockState.updateCheckError = "Unable to reach release server.";
+        mockState.downloadProgress = "";
+        mockState.updateCheckDone = true;
+      } else {
+        startMockUpdateDownload();
+      }
       return null;
     case "get_download_progress":
       return mockState.downloadProgress;
@@ -98,6 +148,7 @@ const currentWindow = isBrowserMock
   ? null
   : (window.__TAURI__.webviewWindow?.getCurrentWebviewWindow?.()
       ?? window.__TAURI__.window?.getCurrentWindow?.()
+      ?? window.__TAURI__.window?.appWindow
       ?? null);
 
 async function mockFetch(url, opts = {}) {
@@ -177,21 +228,24 @@ const chromeMaximizeBtn = document.getElementById("chrome-maximize");
 const chromeCloseBtn = document.getElementById("chrome-close");
 
 if (chromeMinimizeBtn) {
-  chromeMinimizeBtn.addEventListener("click", async () => {
+  chromeMinimizeBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
     if (!currentWindow) return;
     try { await currentWindow.minimize(); } catch {}
   });
 }
 
 if (chromeMaximizeBtn) {
-  chromeMaximizeBtn.addEventListener("click", async () => {
+  chromeMaximizeBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
     if (!currentWindow) return;
     try { await currentWindow.toggleMaximize(); } catch {}
   });
 }
 
 if (chromeCloseBtn) {
-  chromeCloseBtn.addEventListener("click", async () => {
+  chromeCloseBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
     if (!currentWindow) return;
     try { await currentWindow.close(); } catch {}
   });
@@ -505,7 +559,6 @@ pauseBtn.addEventListener("click", async () => {
 });
 
 const stopScrapeBtn = document.getElementById("stop-scrape-btn");
-const stopScrapeSettingsBtn = document.getElementById("stop-scrape-settings-btn");
 
 async function doStopScrape(btn) {
   btn.disabled = true;
@@ -514,12 +567,11 @@ async function doStopScrape(btn) {
     await fetchTimeout(`${SIDECAR}/scrape/stop`, 4000, { method: "POST" });
   } catch {}
   setTimeout(() => {
-    btn.innerHTML = "&#9632; Stop" + (btn.id === "stop-scrape-settings-btn" ? " Scrape" : "");
+    btn.innerHTML = "&#9632; Stop";
   }, 1500);
 }
 
 stopScrapeBtn.addEventListener("click", () => doStopScrape(stopScrapeBtn));
-stopScrapeSettingsBtn.addEventListener("click", () => doStopScrape(stopScrapeSettingsBtn));
 
 const clearProfileBtn = document.getElementById("clear-profile-btn");
 const clearProfileError = document.getElementById("clear-profile-error");
@@ -527,9 +579,7 @@ const clearProfileSuccess = document.getElementById("clear-profile-success");
 
 function updateRunningState(running) {
   document.getElementById("run-scrape-btn").disabled = running;
-  document.getElementById("run-scrape-settings-btn").disabled = running;
   stopScrapeBtn.disabled = !running;
-  stopScrapeSettingsBtn.disabled = !running;
   clearProfileBtn.disabled = running;
 }
 
@@ -592,16 +642,27 @@ const checkUpdateBtn = document.getElementById("check-update-btn");
 const checkUpdateUptodate = document.getElementById("check-update-uptodate");
 const checkUpdateError = document.getElementById("check-update-error");
 const downloadProgress = document.getElementById("download-progress");
+const downloadProgressText = document.getElementById("download-progress-text");
+const downloadProgressFill = document.getElementById("download-progress-fill");
+
+function renderDownloadProgress(progress) {
+  if (!progress) {
+    downloadProgress.style.display = "none";
+    downloadProgressText.textContent = "";
+    downloadProgressFill.style.width = "0%";
+    return;
+  }
+
+  const numericProgress = Number.parseInt(String(progress), 10);
+  downloadProgressText.textContent = "Downloading update: " + progress;
+  downloadProgressFill.style.width = Number.isFinite(numericProgress) ? `${Math.max(0, Math.min(100, numericProgress))}%` : "0%";
+  downloadProgress.style.display = "block";
+}
 
 setInterval(async () => {
   try {
     const progress = await invoke("get_download_progress");
-    if (progress) {
-      downloadProgress.textContent = "Downloading update: " + progress;
-      downloadProgress.style.display = "block";
-    } else {
-      downloadProgress.style.display = "none";
-    }
+    renderDownloadProgress(progress);
   } catch {}
 }, 1000);
 
@@ -638,17 +699,7 @@ checkUpdateBtn.addEventListener("click", async () => {
   }, 500);
 });
 
-const runScrapeSettingsBtn = document.getElementById("run-scrape-settings-btn");
-
-runScrapeSettingsBtn.addEventListener("click", async () => {
-  runScrapeSettingsBtn.disabled = true;
-  runScrapeSettingsBtn.textContent = "Starting...";
-  switchTab("logs");
-  try {
-    await fetchTimeout(`${SIDECAR}/scrape/now`, 4000, { method: "POST" });
-  } catch {}
-  setTimeout(() => {
-    runScrapeSettingsBtn.disabled = false;
-    runScrapeSettingsBtn.innerHTML = "&#9654; Run Scrape";
-  }, 2000);
-});
+if (isBrowserMock && mockUpdateMode === "downloading" && mockState.downloadProgress) {
+  renderDownloadProgress(mockState.downloadProgress);
+  setTimeout(() => startMockUpdateDownload(), 250);
+}
