@@ -23,6 +23,15 @@ export class RealtimeWatcher {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   private consecutiveFailures = 0;
+  /**
+   * Incremented at the start of every connect() call. Any async operation
+   * (token fetch, cooldown timer, reconnect timer) checks this before
+   * proceeding so stale chains from a previous connect() bail out silently.
+   * This prevents the token-refresh timer and the error-reconnect timer from
+   * running as two concurrent connect() chains, which caused double cooldown
+   * logs and shared consecutiveFailures corruption after wake-from-sleep.
+   */
+  private connectGeneration = 0;
   /** Last pending_command_id the watcher has seen — used to dedupe events. */
   private lastSeenCommandId: string | null = null;
 
@@ -51,6 +60,7 @@ export class RealtimeWatcher {
   /** Clean teardown — unsubscribes and clears all timers. */
   stop(): void {
     this.stopped = true;
+    this.connectGeneration++; // invalidate any in-flight connect()
     this.clearTimers();
     if (this.channel) {
       this.channel.unsubscribe().catch(() => undefined);
@@ -70,12 +80,21 @@ export class RealtimeWatcher {
   private async connect(attempt: number): Promise<void> {
     if (this.stopped) return;
 
+    // Claim this generation. Any timer or async op from a previous connect()
+    // chain that checks gen will see a mismatch and bail — prevents concurrent
+    // chains when token-refresh and error-reconnect fire at the same time.
+    const gen = ++this.connectGeneration;
+
+    // Cancel any pending timer from a previous chain so only this chain runs.
+    this.clearTimers();
+
     // Cooldown after too many consecutive failures.
     if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       agentLogger.warn(
         `[realtime] ${MAX_CONSECUTIVE_FAILURES} consecutive failures — cooling down for 5 min`,
       );
       this.reconnectTimer = setTimeout(() => {
+        if (this.connectGeneration !== gen) return; // superseded
         this.consecutiveFailures = 0;
         void this.connect(0);
       }, COOLDOWN_MS);
@@ -87,15 +106,20 @@ export class RealtimeWatcher {
 
     try {
       const res = await this.client.getRealtimeToken();
+      if (this.connectGeneration !== gen) return; // superseded during async fetch
       token = res.token;
       expiresAt = res.expiresAt;
     } catch (err) {
+      if (this.connectGeneration !== gen) return; // superseded during async fetch
       this.consecutiveFailures++;
       const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
       agentLogger.warn(
         `[realtime] Failed to get token (attempt ${attempt + 1}): ${String(err)} — retrying in ${delay / 1000}s`,
       );
-      this.reconnectTimer = setTimeout(() => void this.connect(attempt + 1), delay);
+      this.reconnectTimer = setTimeout(() => {
+        if (this.connectGeneration !== gen) return; // superseded
+        void this.connect(attempt + 1);
+      }, delay);
       return;
     }
 
@@ -152,7 +176,7 @@ export class RealtimeWatcher {
           // Only reset failure counter on a real successful connection.
           this.consecutiveFailures = 0;
           agentLogger.info("[realtime] Subscribed to agent_sessions — instant command delivery active");
-          this.scheduleTokenRefresh(expiresAt);
+          this.scheduleTokenRefresh(expiresAt, gen);
         } else if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") {
           // Null out this.channel first — makes this callback a no-op for any
           // future invocations from this channel instance (Supabase internal retry).
@@ -167,7 +191,10 @@ export class RealtimeWatcher {
             agentLogger.warn(
               `[realtime] Channel ${status}${errDetail} — reconnecting in ${delay / 1000}s (failure ${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`,
             );
-            this.reconnectTimer = setTimeout(() => void this.connect(nextAttempt), delay);
+            this.reconnectTimer = setTimeout(() => {
+              if (this.connectGeneration !== gen) return; // superseded
+              void this.connect(nextAttempt);
+            }, delay);
           }
         }
       });
@@ -175,11 +202,14 @@ export class RealtimeWatcher {
     this.channel = channel;
   }
 
-  private scheduleTokenRefresh(expiresAt: number): void {
+  private scheduleTokenRefresh(expiresAt: number, gen: number): void {
     const nowS = Math.floor(Date.now() / 1000);
     const refreshInMs = Math.max(0, (expiresAt - nowS - REFRESH_BEFORE_EXPIRY_S) * 1000);
 
     this.refreshTimer = setTimeout(() => {
+      if (this.connectGeneration !== gen) return; // superseded
+      // Reset failures — the previous connection was healthy (we were SUBSCRIBED).
+      this.consecutiveFailures = 0;
       agentLogger.info("[realtime] Refreshing Realtime token");
       void this.connect(0);
     }, refreshInMs);
