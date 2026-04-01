@@ -228,15 +228,9 @@ async function toggleWindowMaximize() {
 
 if (titlebarDrag && !isBrowserMock) {
   titlebarDrag.addEventListener("mousedown", async (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    try { await invoke("window_start_dragging"); } catch {}
-  });
-
-  titlebarDrag.addEventListener("dblclick", async (event) => {
+    if (event.buttons !== 1) return;
     if (event.target instanceof HTMLElement && event.target.closest(".chrome-btn")) return;
-    event.preventDefault();
-    await toggleWindowMaximize();
+    try { await invoke("window_start_dragging"); } catch {}
   });
 }
 
@@ -387,8 +381,6 @@ runScrapeBtn.addEventListener("click", async () => {
 });
 
 const logBox = document.getElementById("log-box");
-const logCount = document.getElementById("log-count");
-const clearBtn = document.getElementById("clear-btn");
 
 let localLogs = [];
 let autoScroll = true;
@@ -448,11 +440,10 @@ function createLogEntry(log) {
   return entry;
 }
 
-function renderLogList(box, countEl, logs, emptyMessage, getLastKey, setLastKey, shouldAutoScroll) {
+function renderLogList(box, logs, emptyMessage, getLastKey, setLastKey, shouldAutoScroll) {
   if (logs.length === 0) {
     setLastKey("");
     box.innerHTML = `<div class="log-empty">${esc(emptyMessage)}</div>`;
-    countEl.textContent = "0 entries";
     return;
   }
 
@@ -462,7 +453,6 @@ function renderLogList(box, countEl, logs, emptyMessage, getLastKey, setLastKey,
   setLastKey(newKey);
 
   box.replaceChildren(...logs.map(createLogEntry));
-  countEl.textContent = `${logs.length} entries`;
   if (shouldAutoScroll()) box.scrollTop = box.scrollHeight;
 }
 
@@ -488,7 +478,6 @@ function attachLogCopyNormalizer(box) {
 function renderLogs() {
   renderLogList(
     logBox,
-    logCount,
     localLogs,
     "No logs yet.",
     () => lastLogKey,
@@ -510,18 +499,10 @@ async function pollLogs() {
   } catch {}
 }
 
-clearBtn.addEventListener("click", () => {
-  clearedAt = Date.now();
-  localLogs = [];
-  renderLogs();
-});
-
 pollLogs();
 setInterval(pollLogs, 3000);
 
 const scraperLogBox = document.getElementById("scraper-log-box");
-const scraperLogCount = document.getElementById("scraper-log-count");
-const scraperClearBtn = document.getElementById("scraper-clear-btn");
 
 let scraperLogs = [];
 let scraperAutoScroll = true;
@@ -537,7 +518,6 @@ attachLogCopyNormalizer(scraperLogBox);
 function renderScraperLogs() {
   renderLogList(
     scraperLogBox,
-    scraperLogCount,
     scraperLogs,
     "No scraper logs yet. Logs appear here after a scrape runs.",
     () => scraperLastKey,
@@ -556,12 +536,6 @@ async function pollScraperLogs() {
     renderScraperLogs();
   } catch {}
 }
-
-scraperClearBtn.addEventListener("click", () => {
-  scraperClearedAt = Date.now();
-  scraperLogs = [];
-  renderScraperLogs();
-});
 
 pollScraperLogs();
 setInterval(pollScraperLogs, 3000);
