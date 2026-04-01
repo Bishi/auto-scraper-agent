@@ -144,12 +144,6 @@ async function mockInvoke(command, args = {}) {
 
 const invoke = isBrowserMock ? mockInvoke : window.__TAURI__.core.invoke;
 const appApi = isBrowserMock ? { getVersion: async () => mockState.version } : window.__TAURI__.app;
-const currentWindow = isBrowserMock
-  ? null
-  : (window.__TAURI__.window?.getCurrentWindow?.()
-      ?? window.__TAURI__.webviewWindow?.getCurrentWebviewWindow?.()
-      ?? window.__TAURI__.window?.appWindow
-      ?? null);
 
 async function mockFetch(url, opts = {}) {
   const pathname = new URL(url, window.location.href).pathname;
@@ -229,15 +223,14 @@ const chromeCloseBtn = document.getElementById("chrome-close");
 const titlebarDrag = document.getElementById("titlebar-drag");
 
 async function toggleWindowMaximize() {
-  if (!currentWindow) return;
-  try { await currentWindow.toggleMaximize(); } catch {}
+  try { await invoke("window_toggle_maximize"); } catch {}
 }
 
-if (titlebarDrag && currentWindow) {
+if (titlebarDrag && !isBrowserMock) {
   titlebarDrag.addEventListener("mousedown", async (event) => {
     if (event.button !== 0) return;
     event.preventDefault();
-    try { await currentWindow.startDragging(); } catch {}
+    try { await invoke("window_start_dragging"); } catch {}
   });
 
   titlebarDrag.addEventListener("dblclick", async (event) => {
@@ -255,8 +248,7 @@ if (chromeMinimizeBtn) {
   chromeMinimizeBtn.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!currentWindow) return;
-    try { await currentWindow.minimize(); } catch {}
+    try { await invoke("window_minimize"); } catch {}
   });
 }
 
@@ -280,8 +272,7 @@ if (chromeCloseBtn) {
   chromeCloseBtn.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!currentWindow) return;
-    try { await currentWindow.close(); } catch {}
+    try { await invoke("window_close"); } catch {}
   });
 }
 
@@ -407,6 +398,7 @@ logBox.addEventListener("scroll", () => {
   const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
   autoScroll = atBottom;
 });
+attachLogCopyNormalizer(logBox);
 
 function esc(str) {
   return str
@@ -415,33 +407,94 @@ function esc(str) {
     .replace(/>/g, "&gt;");
 }
 
-function renderLogs() {
-  if (localLogs.length === 0) {
-    lastLogKey = "";
-    logBox.innerHTML = '<div class="log-empty">No logs yet.</div>';
-    logCount.textContent = "0 entries";
+function formatLogTime(ts) {
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+}
+
+function formatLogLevel(level) {
+  return level === "error" ? "ERR" : level === "warn" ? "WRN" : "INF";
+}
+
+function formatLogMessage(msg) {
+  return String(msg || "").replace(/^\[agent\]\s*/, "");
+}
+
+function createLogEntry(log) {
+  const entry = document.createElement("div");
+  const ts = formatLogTime(log.ts);
+  const lvl = formatLogLevel(log.level);
+  const msg = formatLogMessage(log.msg);
+
+  entry.className = `log-entry ${log.level}`;
+  entry.dataset.ts = ts;
+  entry.dataset.level = lvl;
+  entry.dataset.msg = msg;
+
+  const tsEl = document.createElement("span");
+  tsEl.className = "log-ts";
+  tsEl.textContent = ts;
+
+  const levelEl = document.createElement("span");
+  levelEl.className = "log-level";
+  levelEl.textContent = lvl;
+
+  const msgEl = document.createElement("span");
+  msgEl.className = "log-msg";
+  msgEl.textContent = msg;
+
+  entry.append(tsEl, levelEl, msgEl);
+  return entry;
+}
+
+function renderLogList(box, countEl, logs, emptyMessage, getLastKey, setLastKey, shouldAutoScroll) {
+  if (logs.length === 0) {
+    setLastKey("");
+    box.innerHTML = `<div class="log-empty">${esc(emptyMessage)}</div>`;
+    countEl.textContent = "0 entries";
     return;
   }
-  const newKey = `${localLogs.length}:${localLogs[localLogs.length - 1].ts}`;
-  if (newKey === lastLogKey) return;
-  lastLogKey = newKey;
 
-  logBox.innerHTML = localLogs
-    .map((e) => {
-      const ts = new Date(e.ts).toLocaleTimeString(undefined, {
-        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-      });
-      const lvl = e.level === "error" ? "ERR" : e.level === "warn" ? "WRN" : "INF";
-      const msg = e.msg.replace(/^\[agent\]\s*/, "");
-      return `<div class="log-entry ${e.level}">` +
-        `<span class="log-ts">${ts}</span> ` +
-        `<span class="log-level">${lvl}</span> ` +
-        `<span class="log-msg">${esc(msg)}</span>` +
-        `</div>`;
-    })
-    .join("");
-  logCount.textContent = `${localLogs.length} entries`;
-  if (autoScroll) logBox.scrollTop = logBox.scrollHeight;
+  const newest = logs[logs.length - 1];
+  const newKey = `${logs.length}:${newest.ts}:${newest.level}:${newest.msg}`;
+  if (newKey === getLastKey()) return;
+  setLastKey(newKey);
+
+  box.replaceChildren(...logs.map(createLogEntry));
+  countEl.textContent = `${logs.length} entries`;
+  if (shouldAutoScroll()) box.scrollTop = box.scrollHeight;
+}
+
+function getSelectedLogLines(box) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return [];
+
+  const ranges = Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index));
+  return Array.from(box.querySelectorAll(".log-entry"))
+    .filter((entry) => ranges.some((range) => range.intersectsNode(entry)))
+    .map((entry) => `${entry.dataset.ts} ${entry.dataset.level} ${entry.dataset.msg}`);
+}
+
+function attachLogCopyNormalizer(box) {
+  box.addEventListener("copy", (event) => {
+    const lines = getSelectedLogLines(box);
+    if (lines.length === 0 || !event.clipboardData) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", lines.join("\n"));
+  });
+}
+
+function renderLogs() {
+  renderLogList(
+    logBox,
+    logCount,
+    localLogs,
+    "No logs yet.",
+    () => lastLogKey,
+    (value) => { lastLogKey = value; },
+    () => autoScroll,
+  );
 }
 
 let clearedAt = 0;
@@ -479,34 +532,18 @@ scraperLogBox.addEventListener("scroll", () => {
   const atBottom = scraperLogBox.scrollHeight - scraperLogBox.scrollTop - scraperLogBox.clientHeight < 40;
   scraperAutoScroll = atBottom;
 });
+attachLogCopyNormalizer(scraperLogBox);
 
 function renderScraperLogs() {
-  if (scraperLogs.length === 0) {
-    scraperLastKey = "";
-    scraperLogBox.innerHTML = '<div class="log-empty">No scraper logs yet. Logs appear here after a scrape runs.</div>';
-    scraperLogCount.textContent = "0 entries";
-    return;
-  }
-  const newKey = `${scraperLogs.length}:${scraperLogs[scraperLogs.length - 1].ts}`;
-  if (newKey === scraperLastKey) return;
-  scraperLastKey = newKey;
-
-  scraperLogBox.innerHTML = scraperLogs
-    .map((e) => {
-      const ts = new Date(e.ts).toLocaleTimeString(undefined, {
-        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-      });
-      const lvl = e.level === "error" ? "ERR" : e.level === "warn" ? "WRN" : "INF";
-      const msg = e.msg.replace(/^\[agent\]\s*/, "");
-      return `<div class="log-entry ${e.level}">` +
-        `<span class="log-ts">${ts}</span> ` +
-        `<span class="log-level">${lvl}</span> ` +
-        `<span class="log-msg">${esc(msg)}</span>` +
-        `</div>`;
-    })
-    .join("");
-  scraperLogCount.textContent = `${scraperLogs.length} entries`;
-  if (scraperAutoScroll) scraperLogBox.scrollTop = scraperLogBox.scrollHeight;
+  renderLogList(
+    scraperLogBox,
+    scraperLogCount,
+    scraperLogs,
+    "No scraper logs yet. Logs appear here after a scrape runs.",
+    () => scraperLastKey,
+    (value) => { scraperLastKey = value; },
+    () => scraperAutoScroll,
+  );
 }
 
 async function pollScraperLogs() {

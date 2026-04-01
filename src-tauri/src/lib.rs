@@ -106,6 +106,30 @@ fn get_sidecar_token() -> Option<String> {
     SIDECAR_TOKEN.lock().ok().and_then(|g| g.clone())
 }
 
+#[tauri::command]
+fn window_minimize(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_toggle_maximize(window: tauri::WebviewWindow) -> Result<(), String> {
+    if window.is_maximized().map_err(|e| e.to_string())? {
+        window.unmaximize().map_err(|e| e.to_string())
+    } else {
+        window.maximize().map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_start_dragging(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
 /// Triggers the download + install flow. Re-checks GitHub at click time to always
 /// get the absolute latest release (not the cached badge version).
 /// Called from the renderer when the user clicks the update badge.
@@ -601,8 +625,8 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
     .title("Auto-Scraper Agent")
     .decorations(false)
     .background_color(Color(9, 17, 28, 255))
-    .inner_size(860.0, 760.0)
-    .min_inner_size(760.0, 680.0)
+    .inner_size(860.0, 700.0)
+    .min_inner_size(760.0, 620.0)
     .resizable(true)
     .center()
     .build();
@@ -694,7 +718,19 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![save_config, get_update_version, install_update, get_sidecar_token, is_update_check_done, get_update_check_error, get_download_progress])
+        .invoke_handler(tauri::generate_handler![
+            save_config,
+            get_update_version,
+            install_update,
+            get_sidecar_token,
+            is_update_check_done,
+            get_update_check_error,
+            get_download_progress,
+            window_minimize,
+            window_toggle_maximize,
+            window_close,
+            window_start_dragging
+        ])
         .setup(|app| {
             // Clean up any leftover installer files from a previous auto-update.
             // Done in a background thread with a delay: NSIS may still be alive
