@@ -273,7 +273,7 @@ runScrapeBtn.addEventListener("click", async () => {
   } catch {}
   setTimeout(() => {
     runScrapeBtn.disabled = false;
-    runScrapeBtn.textContent = "Run Scrape";
+    runScrapeBtn.innerHTML = "&#9654; Run Scrape";
   }, 2000);
 });
 
@@ -418,10 +418,10 @@ let schedulerPaused = false;
 function updatePauseBtn(paused) {
   schedulerPaused = paused;
   if (paused) {
-    pauseBtn.textContent = "Resume Schedule";
+    pauseBtn.innerHTML = "&#9654; Resume Schedule";
     pauseBtn.classList.add("paused");
   } else {
-    pauseBtn.textContent = "Pause Schedule";
+    pauseBtn.textContent = "|| Pause Schedule";
     pauseBtn.classList.remove("paused");
   }
 }
@@ -484,7 +484,7 @@ async function doStopScrape(btn) {
     await fetchTimeout(`${SIDECAR}/scrape/stop`, 4000, { method: "POST" });
   } catch {}
   setTimeout(() => {
-    btn.textContent = "Stop" + (btn.id === "stop-scrape-settings-btn" ? " Scrape" : "");
+    btn.innerHTML = "&#9632; Stop" + (btn.id === "stop-scrape-settings-btn" ? " Scrape" : "");
   }, 1500);
 }
 
@@ -589,7 +589,7 @@ checkUpdateBtn.addEventListener("click", async () => {
       if (!done) return;
       clearInterval(poll);
       checkUpdateBtn.disabled = false;
-      checkUpdateBtn.textContent = "Check for Updates";
+  checkUpdateBtn.innerHTML = "&#8593; Check for Updates";
       const [tag, err] = await Promise.all([
         invoke("get_update_version"),
         invoke("get_update_check_error"),
@@ -619,6 +619,6 @@ runScrapeSettingsBtn.addEventListener("click", async () => {
   } catch {}
   setTimeout(() => {
     runScrapeSettingsBtn.disabled = false;
-    runScrapeSettingsBtn.textContent = "Run Scrape";
+    runScrapeSettingsBtn.innerHTML = "&#9654; Run Scrape";
   }, 2000);
 });
