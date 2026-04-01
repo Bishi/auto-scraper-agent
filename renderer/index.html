@@ -41,12 +41,12 @@ body::before{content:"";position:fixed;inset:0;background:linear-gradient(rgba(1
 .tabs-bar{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);flex-shrink:0;width:100%}
 .tabs{display:flex;gap:4px;min-width:0;flex:1 1 auto}.tab{position:relative;padding:12px 14px 11px;color:var(--text-3);font-size:13px;font-weight:600;cursor:pointer;user-select:none}.tab.active{color:var(--text)}.tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
 .tabs-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto;padding-bottom:8px}
-.content{flex:1;min-height:0;display:flex;flex-direction:column;width:100%}.panel{display:none;min-height:0;width:100%}.panel.active{display:flex;flex:1;min-height:0;width:100%}#panel-settings.active{overflow-y:auto}.panel-shell{width:100%;min-height:0;display:flex;flex-direction:column;flex:1}.settings-shell{display:grid;gap:14px;padding:16px;border:1px solid var(--border);background:linear-gradient(180deg,var(--panel) 0%,var(--panel-soft) 100%);min-height:100%;flex:1}.settings-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:22px;width:100%;align-items:start}.settings-pane{min-width:0}.settings-side{display:flex;flex-direction:column;justify-content:flex-start;gap:18px;min-width:0}.settings-feedback{display:grid;gap:10px;align-content:start;min-height:96px;padding-top:2px}.section-stack{display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
-.section{padding:14px;border:1px solid var(--border);background:linear-gradient(180deg,var(--panel) 0%,var(--panel-soft) 100%);min-width:0}.settings-shell .section{padding:0;border:none;background:none}.settings-pane,.settings-side>.section{display:flex;flex-direction:column}.section-title{margin-bottom:12px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2)}
-.field{display:grid;gap:5px}.field+.field{margin-top:12px}label{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3)}
-input[type="url"],input[type="password"],input[type="text"]{min-height:34px;width:100%;padding:0 10px;border:1px solid rgba(123,151,187,.12);background:rgba(8,14,23,.54);font-size:12px;color:var(--text-2);outline:none}input[type="url"]:focus,input[type="password"]:focus,input[type="text"]:focus{border-color:rgba(111,158,232,.32);box-shadow:0 0 0 2px rgba(111,158,232,.1);color:var(--text)}
+.content{flex:1;min-height:0;display:flex;flex-direction:column;width:100%}.panel{display:none;min-height:0;width:100%}.panel.active{display:flex;flex:1;min-height:0;width:100%}#panel-settings.active{overflow-y:auto}.panel-shell{width:100%;min-height:0;display:flex;flex-direction:column;flex:1}.settings-shell{display:grid;gap:14px;padding:16px;border:1px solid var(--border);background:linear-gradient(180deg,var(--panel) 0%,var(--panel-soft) 100%);min-height:100%;flex:1}.settings-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:22px;width:100%;align-items:start}.settings-pane{min-width:0;display:grid;align-content:start}.settings-side{min-width:0}.settings-feedback{display:grid;gap:10px;align-content:start;min-height:112px;margin-top:12px}.section-stack{display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
+.section{padding:14px;border:1px solid var(--border);background:linear-gradient(180deg,var(--panel) 0%,var(--panel-soft) 100%);min-width:0}.settings-shell .section{padding:0;border:none;background:none}
+.field{display:grid;gap:5px}.field+.field{margin-top:12px}label,.field-label{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3)}
+input[type="url"],input[type="password"],input[type="text"]{height:34px;width:100%;padding:0 10px;border:1px solid rgba(123,151,187,.12);background:rgba(8,14,23,.54);font-size:12px;line-height:1;color:var(--text-2);outline:none}input[type="url"]:focus,input[type="password"]:focus,input[type="text"]:focus{border-color:rgba(111,158,232,.32);box-shadow:0 0 0 2px rgba(111,158,232,.1);color:var(--text)}
 .hint{color:var(--text-3);font-size:11px;line-height:1.4}
-button.primary,button.secondary,button.run,button.stop,button.ghost,button.danger{min-height:32px;width:100%;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;transition:opacity .15s ease,background .15s ease,color .15s ease;padding:0 10px;white-space:nowrap}button.primary,button.secondary,button.ghost{border:1px solid var(--border);background:rgba(12,19,31,.46);color:var(--text-2)}button.primary{margin-top:14px}button.primary:hover,button.secondary:hover,button.ghost:hover{background:rgba(19,31,49,.62);color:var(--text)}button.run{border:1px solid rgba(53,179,106,.24);background:rgba(19,56,38,.52);color:#a8ebc2}button.stop,button.danger{border:1px solid rgba(209,100,120,.2);background:rgba(63,28,38,.46);color:#e4b0bc}
+button.primary,button.secondary,button.run,button.stop,button.ghost,button.danger{height:34px;width:100%;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-size:10px;font-weight:600;letter-spacing:.04em;line-height:1;text-transform:uppercase;transition:opacity .15s ease,background .15s ease,color .15s ease;padding:0 10px;white-space:nowrap}button.primary,button.secondary,button.ghost{border:1px solid var(--border);background:rgba(12,19,31,.46);color:var(--text-2)}button.primary{margin-top:14px}button.primary:hover,button.secondary:hover,button.ghost:hover{background:rgba(19,31,49,.62);color:var(--text)}button.run{border:1px solid rgba(53,179,106,.24);background:rgba(19,56,38,.52);color:#a8ebc2}button.stop,button.danger{border:1px solid rgba(209,100,120,.2);background:rgba(63,28,38,.46);color:#e4b0bc}
 .tabs-actions button.run,.tabs-actions button.stop{width:auto;min-height:28px;padding:0 10px;font-size:9px;line-height:1}
 .alert{padding:12px 14px;font-size:13px;line-height:1.5;display:none}.alert.success{padding:2px 0;border:none;background:none;color:#9fcbaf;font-size:12px;line-height:1.35}.alert.error{border:1px solid rgba(209,100,120,.24);background:linear-gradient(180deg,rgba(66,27,39,.45) 0%,rgba(50,21,30,.74) 100%);color:#f0bcc7}.alert.info{border:1px solid rgba(111,158,232,.2);background:linear-gradient(180deg,rgba(17,43,77,.55) 0%,rgba(13,31,56,.76) 100%);color:#b6d1f2}
 .progress-track{margin-top:10px;height:8px;border:1px solid rgba(111,158,232,.2);background:rgba(8,14,23,.72);overflow:hidden}
@@ -125,35 +125,35 @@ button.primary,button.secondary,button.run,button.stop,button.ghost,button.dange
                     </div>
 
                     <button class="primary" id="save-btn">Save</button>
+
+                    <div class="settings-feedback">
+                      <div class="alert error" id="error-msg"></div>
+                      <div class="alert success" id="success-msg">Saved. Agent will scrape on schedule.</div>
+                      <div class="alert success" id="check-update-uptodate">You're on the latest version.</div>
+                      <div class="alert error" id="check-update-error"></div>
+                      <div class="alert info" id="download-progress" style="display:none">
+                        <div id="download-progress-text"></div>
+                        <div class="progress-track">
+                          <div class="progress-fill" id="download-progress-fill"></div>
+                        </div>
+                      </div>
+                      <div class="alert error" id="clear-profile-error"></div>
+                      <div class="alert success" id="clear-profile-success">Browser profile cleared. It will start fresh on the next scrape.</div>
+                    </div>
                   </div>
 
                   <div class="settings-side">
-                    <div class="section">
-                      <div class="section-title">Updates</div>
+                    <div class="field">
+                      <div class="field-label">Updates</div>
                       <button class="secondary" id="check-update-btn">&#8593; Check for Updates</button>
                     </div>
 
-                    <div class="section">
-                      <div class="section-title">Troubleshooting</div>
+                    <div class="field">
+                      <div class="field-label">Troubleshooting</div>
                       <button class="danger" id="clear-profile-btn">Clear Browser Profile</button>
-                      <div class="hint" id="clear-profile-hint" style="margin-top:12px">Fixes Cloudflare blocks. Only available when no scrape is running.</div>
+                      <div class="hint" id="clear-profile-hint" style="margin-top:7px">Fixes Cloudflare blocks. Only available when no scrape is running.</div>
                     </div>
                   </div>
-                </div>
-
-                <div class="settings-feedback">
-                  <div class="alert error" id="error-msg"></div>
-                  <div class="alert success" id="success-msg">Saved. Agent will scrape on schedule.</div>
-                  <div class="alert success" id="check-update-uptodate">You're on the latest version.</div>
-                  <div class="alert error" id="check-update-error"></div>
-                  <div class="alert info" id="download-progress" style="display:none">
-                    <div id="download-progress-text"></div>
-                    <div class="progress-track">
-                      <div class="progress-fill" id="download-progress-fill"></div>
-                    </div>
-                  </div>
-                  <div class="alert error" id="clear-profile-error"></div>
-                  <div class="alert success" id="clear-profile-success">Browser profile cleared. It will start fresh on the next scrape.</div>
                 </div>
               </div>
             </div>
