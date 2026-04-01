@@ -94,6 +94,7 @@ async function mockInvoke(command, args = {}) {
 
 const invoke = isBrowserMock ? mockInvoke : window.__TAURI__.core.invoke;
 const appApi = isBrowserMock ? { getVersion: async () => mockState.version } : window.__TAURI__.app;
+const currentWindow = isBrowserMock ? null : window.__TAURI__.window.getCurrentWindow();
 
 async function mockFetch(url, opts = {}) {
   const pathname = new URL(url, window.location.href).pathname;
@@ -166,6 +167,31 @@ document.querySelectorAll(".tab").forEach((tab) => {
 
 const initialTab = new URLSearchParams(window.location.search).get("tab");
 if (initialTab) switchTab(initialTab);
+
+const chromeMinimizeBtn = document.getElementById("chrome-minimize");
+const chromeMaximizeBtn = document.getElementById("chrome-maximize");
+const chromeCloseBtn = document.getElementById("chrome-close");
+
+if (chromeMinimizeBtn) {
+  chromeMinimizeBtn.addEventListener("click", async () => {
+    if (!currentWindow) return;
+    try { await currentWindow.minimize(); } catch {}
+  });
+}
+
+if (chromeMaximizeBtn) {
+  chromeMaximizeBtn.addEventListener("click", async () => {
+    if (!currentWindow) return;
+    try { await currentWindow.toggleMaximize(); } catch {}
+  });
+}
+
+if (chromeCloseBtn) {
+  chromeCloseBtn.addEventListener("click", async () => {
+    if (!currentWindow) return;
+    try { await currentWindow.close(); } catch {}
+  });
+}
 
 function fetchTimeout(url, ms = 2000, opts = {}) {
   if (isBrowserMock) {

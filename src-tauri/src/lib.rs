@@ -598,7 +598,9 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
         tauri::WebviewUrl::App(url_path.into()),
     )
     .title("Auto-Scraper Agent")
-    .inner_size(680.0, 620.0)
+    .decorations(false)
+    .inner_size(860.0, 760.0)
+    .min_inner_size(760.0, 680.0)
     .resizable(true)
     .center()
     .build();
