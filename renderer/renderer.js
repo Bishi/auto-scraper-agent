@@ -94,7 +94,11 @@ async function mockInvoke(command, args = {}) {
 
 const invoke = isBrowserMock ? mockInvoke : window.__TAURI__.core.invoke;
 const appApi = isBrowserMock ? { getVersion: async () => mockState.version } : window.__TAURI__.app;
-const currentWindow = isBrowserMock ? null : window.__TAURI__.window.getCurrentWindow();
+const currentWindow = isBrowserMock
+  ? null
+  : (window.__TAURI__.webviewWindow?.getCurrentWebviewWindow?.()
+      ?? window.__TAURI__.window?.getCurrentWindow?.()
+      ?? null);
 
 async function mockFetch(url, opts = {}) {
   const pathname = new URL(url, window.location.href).pathname;
