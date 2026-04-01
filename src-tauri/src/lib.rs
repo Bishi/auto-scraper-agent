@@ -16,6 +16,7 @@ use tauri::{
     AppHandle, Manager, Runtime,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     menu::{Menu, MenuEvent, MenuItem},
+    window::Color,
 };
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_opener::OpenerExt;
@@ -599,6 +600,7 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
     )
     .title("Auto-Scraper Agent")
     .decorations(false)
+    .background_color(Color(9, 17, 28, 255))
     .inner_size(860.0, 760.0)
     .min_inner_size(760.0, 680.0)
     .resizable(true)

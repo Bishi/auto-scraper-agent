@@ -146,8 +146,8 @@ const invoke = isBrowserMock ? mockInvoke : window.__TAURI__.core.invoke;
 const appApi = isBrowserMock ? { getVersion: async () => mockState.version } : window.__TAURI__.app;
 const currentWindow = isBrowserMock
   ? null
-  : (window.__TAURI__.webviewWindow?.getCurrentWebviewWindow?.()
-      ?? window.__TAURI__.window?.getCurrentWindow?.()
+  : (window.__TAURI__.window?.getCurrentWindow?.()
+      ?? window.__TAURI__.webviewWindow?.getCurrentWebviewWindow?.()
       ?? window.__TAURI__.window?.appWindow
       ?? null);
 
@@ -226,9 +226,34 @@ if (initialTab) switchTab(initialTab);
 const chromeMinimizeBtn = document.getElementById("chrome-minimize");
 const chromeMaximizeBtn = document.getElementById("chrome-maximize");
 const chromeCloseBtn = document.getElementById("chrome-close");
+const titlebarDrag = document.getElementById("titlebar-drag");
+
+async function toggleWindowMaximize() {
+  if (!currentWindow) return;
+  try { await currentWindow.toggleMaximize(); } catch {}
+}
+
+if (titlebarDrag && currentWindow) {
+  titlebarDrag.addEventListener("mousedown", async (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    try { await currentWindow.startDragging(); } catch {}
+  });
+
+  titlebarDrag.addEventListener("dblclick", async (event) => {
+    if (event.target instanceof HTMLElement && event.target.closest(".chrome-btn")) return;
+    event.preventDefault();
+    await toggleWindowMaximize();
+  });
+}
 
 if (chromeMinimizeBtn) {
+  chromeMinimizeBtn.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
   chromeMinimizeBtn.addEventListener("click", async (event) => {
+    event.preventDefault();
     event.stopPropagation();
     if (!currentWindow) return;
     try { await currentWindow.minimize(); } catch {}
@@ -236,15 +261,24 @@ if (chromeMinimizeBtn) {
 }
 
 if (chromeMaximizeBtn) {
-  chromeMaximizeBtn.addEventListener("click", async (event) => {
+  chromeMaximizeBtn.addEventListener("mousedown", (event) => {
+    event.preventDefault();
     event.stopPropagation();
-    if (!currentWindow) return;
-    try { await currentWindow.toggleMaximize(); } catch {}
+  });
+  chromeMaximizeBtn.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    await toggleWindowMaximize();
   });
 }
 
 if (chromeCloseBtn) {
+  chromeCloseBtn.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
   chromeCloseBtn.addEventListener("click", async (event) => {
+    event.preventDefault();
     event.stopPropagation();
     if (!currentWindow) return;
     try { await currentWindow.close(); } catch {}
