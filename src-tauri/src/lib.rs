@@ -625,7 +625,7 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
     .title("Auto-Scraper Agent")
     .decorations(false)
     .background_color(Color(9, 17, 28, 255))
-    .inner_size(860.0, 700.0)
+    .inner_size(860.0, 702.0)
     .min_inner_size(760.0, 620.0)
     .resizable(true)
     .center()

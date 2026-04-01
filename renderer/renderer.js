@@ -207,6 +207,8 @@ function switchTab(name) {
   if (tabEl) {
     tabEl.classList.add("active");
     document.getElementById("panel-" + name).classList.add("active");
+    if (name === "logs") ensureInitialLogScroll();
+    if (name === "scraper") ensureInitialScraperLogScroll();
   }
 }
 
@@ -385,6 +387,7 @@ const logBox = document.getElementById("log-box");
 let localLogs = [];
 let autoScroll = true;
 let lastLogKey = "";
+let logInitialPositioned = false;
 
 logBox.addEventListener("scroll", () => {
   const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
@@ -486,6 +489,15 @@ function renderLogs() {
   );
 }
 
+function ensureInitialLogScroll() {
+  if (logInitialPositioned) return;
+  requestAnimationFrame(() => {
+    logBox.scrollTop = logBox.scrollHeight;
+    autoScroll = true;
+    logInitialPositioned = true;
+  });
+}
+
 let clearedAt = 0;
 
 async function pollLogs() {
@@ -508,6 +520,7 @@ let scraperLogs = [];
 let scraperAutoScroll = true;
 let scraperLastKey = "";
 let scraperClearedAt = 0;
+let scraperLogInitialPositioned = false;
 
 scraperLogBox.addEventListener("scroll", () => {
   const atBottom = scraperLogBox.scrollHeight - scraperLogBox.scrollTop - scraperLogBox.clientHeight < 40;
@@ -524,6 +537,15 @@ function renderScraperLogs() {
     (value) => { scraperLastKey = value; },
     () => scraperAutoScroll,
   );
+}
+
+function ensureInitialScraperLogScroll() {
+  if (scraperLogInitialPositioned) return;
+  requestAnimationFrame(() => {
+    scraperLogBox.scrollTop = scraperLogBox.scrollHeight;
+    scraperAutoScroll = true;
+    scraperLogInitialPositioned = true;
+  });
 }
 
 async function pollScraperLogs() {
