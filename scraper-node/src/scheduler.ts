@@ -2,6 +2,7 @@ import type { AgentApiClient } from "./api-client.js";
 import { runModule } from "./scraper.js";
 import { agentLogger, pushScraperLogs } from "./logger.js";
 import type { DbConfig } from "./shared/types.js";
+import { RealtimeWatcher } from "./realtime-watcher.js";
 
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
@@ -10,6 +11,8 @@ type Trigger = "startup" | "schedule" | "manual" | "server" | "resume";
 export class Scheduler {
   private scrapeTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private realtimeWatcher: RealtimeWatcher | null = null;
+  private _fireImmediateHeartbeat: (() => void) | null = null;
   private _running = false;
   private _paused = false;
   private _stopRequested = false;
@@ -43,6 +46,26 @@ export class Scheduler {
     this._paused = false;
     this.startHeartbeat(client);
     void this.runCycle(client, true, "startup");
+
+    // Start Realtime subscription non-blocking — if the server doesn't support
+    // it (old deploy, missing env var) the watcher logs a warning and we fall
+    // back to the normal 60s heartbeat polling. Never block startup on this.
+    client.getRealtimeToken()
+      .then((res) => {
+        if (this.realtimeWatcher) return; // already started (shouldn't happen)
+        this.realtimeWatcher = new RealtimeWatcher(
+          res.supabaseUrl,
+          res.anonKey,
+          client,
+          () => { this._fireImmediateHeartbeat?.(); },
+        );
+        // Seed the initial command ID so the first event doesn't fire a
+        // spurious heartbeat for a command that was already delivered.
+        void this.realtimeWatcher.start();
+      })
+      .catch((err: unknown) => {
+        agentLogger.warn(`[realtime] Unavailable — falling back to polling: ${String(err)}`);
+      });
   }
 
   stop(): void {
@@ -53,6 +76,9 @@ export class Scheduler {
     this.nextRunAt = null;
     this._paused = false;
     this._pendingAckCommandId = null;
+    this.realtimeWatcher?.stop();
+    this.realtimeWatcher = null;
+    this._fireImmediateHeartbeat = null;
   }
 
   /** Request an in-progress scrape to halt after the current module completes. */
@@ -184,11 +210,26 @@ export class Scheduler {
               this.resume(client);
             }
           }
+
+          // Keep the Realtime watcher's dedupe state in sync so it doesn't
+          // fire a spurious immediate heartbeat for a command we just picked up.
+          this.realtimeWatcher?.seedCommandId(res.commandId ?? null);
+
+          // If this beat just set a pending ACK, fire a follow-up beat after a
+          // short delay so the ACK reaches the server in ~500 ms rather than
+          // waiting up to 60 s for the next scheduled heartbeat. This clears
+          // "Pausing…" / "Resuming…" on the dashboard almost immediately.
+          if (this._pendingAckCommandId === res.commandId && res.commandId) {
+            setTimeout(() => beat(), 500);
+          }
         })
         .catch((err: unknown) => {
           agentLogger.error("[agent] Heartbeat failed: " + String(err));
         });
     };
+    // Expose beat so RealtimeWatcher can fire an immediate heartbeat when a
+    // new pending_command_id is detected on the agent_sessions row.
+    this._fireImmediateHeartbeat = beat;
     beat(); // immediate first beat
     this.heartbeatTimer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
   }

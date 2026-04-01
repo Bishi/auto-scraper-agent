@@ -22,6 +22,15 @@ export interface PushResultsResponse {
   summary: DiffSummary;
 }
 
+export interface RealtimeTokenResponse {
+  token: string;
+  /** Unix epoch seconds when the token expires. */
+  expiresAt: number;
+  supabaseUrl: string;
+  /** Supabase publishable anon key — used as the `createClient` second arg. */
+  anonKey: string;
+}
+
 export interface HeartbeatResponse {
   ok: boolean;
   command?: string | null;
@@ -62,6 +71,10 @@ export class AgentApiClient {
 
   async getConfig(): Promise<DbConfig> {
     return this.request<DbConfig>("/api/agent/config");
+  }
+
+  async getRealtimeToken(): Promise<RealtimeTokenResponse> {
+    return this.request<RealtimeTokenResponse>("/api/agent/realtime-token");
   }
 
   async getSchedule(): Promise<Schedule> {
