@@ -9,9 +9,35 @@ const BACKOFF_MAX_MS           = 30_000;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const COOLDOWN_MS              = 5 * 60_000; // 5 min after 5 consecutive failures
 
+type AgentSessionCommandEnvelope = {
+  pending_command?: string | null;
+  pending_command_id?: string | null;
+};
+
+export function shouldTriggerCommandHint(
+  nextRow: AgentSessionCommandEnvelope,
+  prevRow: AgentSessionCommandEnvelope,
+  lastSeenCommandId: string | null,
+): boolean {
+  const nextCommand = nextRow.pending_command ?? null;
+  const nextId = nextRow.pending_command_id ?? null;
+  const prevCommand = prevRow.pending_command ?? null;
+  const prevId = prevRow.pending_command_id ?? null;
+
+  if (nextCommand == null || nextId == null) {
+    return false;
+  }
+
+  if (nextCommand === prevCommand && nextId === prevId) {
+    return false;
+  }
+
+  return nextId !== lastSeenCommandId;
+}
+
 /**
  * Maintains a Supabase Realtime subscription to `agent_sessions` so the agent
- * receives an instant push when a new command is enqueued (pending_command_id changes).
+ * receives an instant push when a new command is enqueued (command envelope changes).
  *
  * This is a wake-up hint only — the heartbeat + ACK flow is the source of truth.
  * If the watcher cannot connect (old server, missing env var, network error), it
@@ -148,19 +174,15 @@ export class RealtimeWatcher {
           table: "agent_sessions",
         },
         (payload) => {
-          const newId = (payload.new as Record<string, unknown>)["pending_command_id"] as string | null | undefined;
-          const oldId = (payload.old as Record<string, unknown>)["pending_command_id"] as string | null | undefined;
+          const nextRow = payload.new as AgentSessionCommandEnvelope;
+          const prevRow = payload.old as AgentSessionCommandEnvelope;
 
-          // Only fire if pending_command_id changed to a new non-null value.
+          // React only to command-envelope changes.
           // Heartbeat writes touch other columns (last_heartbeat, etc.) but
           // don't change pending_command_id — this prevents a feedback loop.
-          if (
-            newId != null &&
-            newId !== oldId &&
-            newId !== this.lastSeenCommandId
-          ) {
+          if (shouldTriggerCommandHint(nextRow, prevRow, this.lastSeenCommandId)) {
             agentLogger.info("[realtime] New command detected — firing immediate heartbeat");
-            this.lastSeenCommandId = newId;
+            this.lastSeenCommandId = nextRow.pending_command_id ?? null;
             this.onCommandHint();
           }
         },

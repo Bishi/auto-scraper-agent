@@ -132,14 +132,29 @@ export class Scheduler {
     await this.runCycle(client, true, trigger);
   }
 
+  private currentHeartbeatOptions(extra: {
+    failureMsg?: string;
+    failureJobId?: number;
+  } = {}): {
+    schedulerPaused: boolean;
+    activeJobId: number | null;
+    ackCommandId?: string;
+    failureMsg?: string;
+    failureJobId?: number;
+  } {
+    return {
+      schedulerPaused: this._paused,
+      activeJobId: this._activeJobId,
+      ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
+      ...(extra.failureMsg ? { failureMsg: extra.failureMsg } : {}),
+      ...(extra.failureJobId !== undefined ? { failureJobId: extra.failureJobId } : {}),
+    };
+  }
+
   private startHeartbeat(client: AgentApiClient): void {
     const beat = (): void => {
       client
-        .heartbeat(this._version, process.platform, {
-          schedulerPaused: this._paused,
-          activeJobId: this._activeJobId,
-          ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
-        })
+        .heartbeat(this._version, process.platform, this.currentHeartbeatOptions())
         .then((res) => {
           // Drop local ack target once the server clears pending (same commandId no longer returned).
           if (this._pendingAckCommandId) {
@@ -254,12 +269,11 @@ export class Scheduler {
     } catch (err) {
       const errMsg = String(err);
       agentLogger.error("[agent] Scrape cycle failed: " + errMsg);
-      Promise.resolve(client.heartbeat(this._version, process.platform, {
-        schedulerPaused: this._paused,
-        activeJobId: this._activeJobId,
-        ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
-        failureMsg: errMsg,
-      })).catch(() => {});
+      Promise.resolve(client.heartbeat(
+        this._version,
+        process.platform,
+        this.currentHeartbeatOptions({ failureMsg: errMsg }),
+      )).catch(() => {});
     } finally {
       this._running = false;
     }
@@ -318,9 +332,22 @@ export class Scheduler {
       if (jobId !== undefined) {
         startedJobIds.add(jobId);
         this._activeJobId = jobId;
-        await client.startJob(jobId, moduleStartedAt.toISOString()).catch((err: unknown) => {
-          agentLogger.warn(`[agent] Failed to mark job ${jobId} as running: ` + String(err));
-        });
+        try {
+          await client.startJob(jobId, moduleStartedAt.toISOString());
+        } catch (err: unknown) {
+          const errMsg = String(err);
+          agentLogger.error(`[agent] Failed to mark job ${jobId} as running: ${errMsg}`);
+          Promise.resolve(client.heartbeat(
+            this._version,
+            process.platform,
+            this.currentHeartbeatOptions({
+              failureMsg: `Failed to start job ${jobId}: ${errMsg}`,
+              failureJobId: jobId,
+            }),
+          )).catch(() => {});
+          this._activeJobId = null;
+          continue;
+        }
       }
       try {
         let result = await runModule(moduleName, moduleConfig, browserOptions);
@@ -342,9 +369,13 @@ export class Scheduler {
         // Push scraper module logs into the Scraper tab buffer.
         pushScraperLogs(moduleName, result.logs);
 
+        if (jobId === undefined) {
+          throw new Error(`Missing scheduled job id for module ${moduleName}`);
+        }
+
         const response = await client.pushResults({
           moduleName,
-          jobId: jobMap.get(moduleName),
+          jobId,
           listings: result.listings,
           logs: result.logs,
           filteredListings: result.filteredListings,
@@ -359,7 +390,6 @@ export class Scheduler {
           `[agent] ${moduleName}: total=${s.total} new=${s.new} changed=${s.changed} removed=${s.removed}`,
         );
       } catch (err) {
-        this._activeJobId = null;
         const errMsg = String(err);
         const isRateLimited = errMsg.includes("Rate limited (429)");
         if (isRateLimited) {
@@ -367,12 +397,15 @@ export class Scheduler {
         } else {
           agentLogger.error(`[agent] Failed to scrape/push ${moduleName}: ` + errMsg);
         }
-        Promise.resolve(client.heartbeat(this._version, process.platform, {
-          schedulerPaused: this._paused,
-          activeJobId: this._activeJobId,
-          ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
-          failureMsg: errMsg,
-        })).catch(() => {});
+        Promise.resolve(client.heartbeat(
+          this._version,
+          process.platform,
+          this.currentHeartbeatOptions({
+            failureMsg: errMsg,
+            ...(jobId !== undefined ? { failureJobId: jobId } : {}),
+          }),
+        )).catch(() => {});
+        this._activeJobId = null;
       }
     }
 

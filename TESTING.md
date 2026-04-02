@@ -175,6 +175,8 @@ Tagged `latest`, marked pre-release. Use for testing unreleased builds.
 
 ## What to test after installing
 
+See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the expected Realtime + heartbeat behavior and job-state contract behind these checks.
+
 1. App appears in system tray
 2. Setup window opens (or skips if API key already saved)
 3. "Run Now" tray menu item triggers a scrape

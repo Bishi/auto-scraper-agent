@@ -1,19 +1,28 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Scheduler } from "../src/scheduler.js";
-import type { AgentApiClient } from "../src/api-client.js";
+import type { AgentApiClient, HeartbeatOptions } from "../src/api-client.js";
+import { runModule } from "../src/scraper.js";
+
+vi.mock("../src/scraper.js", () => ({
+  runModule: vi.fn(),
+}));
 
 function mockClient(): AgentApiClient {
   return {
+    cancelJobs: vi.fn().mockResolvedValue(undefined),
     getConfig: vi.fn(),
     getSchedule: vi.fn(),
     pushResults: vi.fn(),
-    heartbeat: vi.fn(),
-    // Simulate a server that doesn't support Realtime — watcher falls back to polling silently.
+    heartbeat: vi.fn().mockResolvedValue({ ok: true }),
+    startJob: vi.fn().mockResolvedValue(undefined),
+    // Simulate a server that doesn't support Realtime; watcher falls back to polling silently.
     getRealtimeToken: vi.fn().mockRejectedValue(new Error("not supported")),
   } as unknown as AgentApiClient;
 }
 
-describe("Scheduler — state machine", () => {
+const runModuleMock = vi.mocked(runModule);
+
+describe("Scheduler - state machine", () => {
   it("initial state: not running, not paused, no next run", () => {
     const s = new Scheduler();
     expect(s.isRunning).toBe(false);
@@ -23,7 +32,6 @@ describe("Scheduler — state machine", () => {
 
   it("pause() sets isPaused and clears nextRunAt", () => {
     const s = new Scheduler();
-    // Simulate a scheduled scrape being set
     (s as unknown as { nextRunAt: number }).nextRunAt = Date.now() + 60_000;
     s.pause();
     expect(s.isPaused).toBe(true);
@@ -48,11 +56,10 @@ describe("Scheduler — state machine", () => {
   });
 });
 
-describe("Scheduler — triggerNow()", () => {
+describe("Scheduler - triggerNow()", () => {
   it("skips and does not call getSchedule when already running", async () => {
     const s = new Scheduler();
     const client = mockClient();
-    // Force the running flag to simulate an active scrape
     (s as unknown as { _running: boolean })._running = true;
     await s.triggerNow(client);
     expect(client.getSchedule).not.toHaveBeenCalled();
@@ -64,13 +71,12 @@ describe("Scheduler — triggerNow()", () => {
     (client.getSchedule as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("network error"),
     );
-    // runCycle will fail gracefully — we just confirm it attempted the call
     await s.triggerNow(client);
     expect(client.getSchedule).toHaveBeenCalledOnce();
   });
 });
 
-describe("Scheduler — heartbeat pause/resume", () => {
+describe("Scheduler - heartbeat pause/resume", () => {
   it("applies pause when server returns pause + commandId", async () => {
     const client = mockClient();
     (client.getSchedule as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -98,5 +104,97 @@ describe("Scheduler — heartbeat pause/resume", () => {
     );
     s.stop();
   });
+});
 
+describe("Scheduler - job lifecycle reporting", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reports startup failure against the specific job id", async () => {
+    const s = new Scheduler();
+    const client = mockClient();
+    const heartbeat = client.heartbeat as ReturnType<typeof vi.fn>;
+    const startJob = client.startJob as ReturnType<typeof vi.fn>;
+
+    startJob.mockRejectedValue(new Error("start failed"));
+    (client.getConfig as ReturnType<typeof vi.fn>).mockResolvedValue({
+      modules: { bolha: { enabled: true } },
+    });
+
+    await (s as unknown as {
+      scrapeAll: (
+        c: AgentApiClient,
+        config: { modules: Record<string, { enabled: boolean }> },
+        jobMap: Map<string, number>,
+        trigger: "manual",
+      ) => Promise<void>;
+    }).scrapeAll(
+      client,
+      { modules: { bolha: { enabled: true } } },
+      new Map([["bolha", 42]]),
+      "manual",
+    );
+
+    expect(startJob).toHaveBeenCalledWith(42, expect.any(String));
+    expect(runModuleMock).not.toHaveBeenCalled();
+    expect(client.pushResults).not.toHaveBeenCalled();
+    expect(heartbeat).toHaveBeenCalledWith(
+      "",
+      expect.any(String),
+      expect.objectContaining<HeartbeatOptions>({
+        schedulerPaused: false,
+        activeJobId: 42,
+        failureJobId: 42,
+      }),
+    );
+  });
+
+  it("reports scrape or result failure with the active job id before clearing it", async () => {
+    const s = new Scheduler();
+    const client = mockClient();
+    const heartbeat = client.heartbeat as ReturnType<typeof vi.fn>;
+
+    runModuleMock.mockResolvedValue({
+      hadManagedChallenge: false,
+      listings: [],
+      logs: [],
+      filteredListings: [],
+      failedUrls: [],
+      debugSnapshots: [],
+    });
+    (client.pushResults as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("upload failed"));
+
+    await (s as unknown as {
+      scrapeAll: (
+        c: AgentApiClient,
+        config: { modules: Record<string, { enabled: boolean }> },
+        jobMap: Map<string, number>,
+        trigger: "manual",
+      ) => Promise<void>;
+    }).scrapeAll(
+      client,
+      { modules: { bolha: { enabled: true } } },
+      new Map([["bolha", 77]]),
+      "manual",
+    );
+
+    expect(client.startJob).toHaveBeenCalledWith(77, expect.any(String));
+    expect(client.pushResults).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: 77,
+        moduleName: "bolha",
+      }),
+    );
+    expect(heartbeat).toHaveBeenCalledWith(
+      "",
+      expect.any(String),
+      expect.objectContaining<HeartbeatOptions>({
+        schedulerPaused: false,
+        activeJobId: 77,
+        failureJobId: 77,
+      }),
+    );
+    expect((s as unknown as { _activeJobId: number | null })._activeJobId).toBeNull();
+  });
 });

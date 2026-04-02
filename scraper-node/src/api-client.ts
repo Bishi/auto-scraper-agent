@@ -7,7 +7,7 @@ export interface Schedule {
 
 export interface PushResultsParams {
   moduleName: string;
-  jobId?: number;
+  jobId: number;
   listings: Listing[];
   logs: LogEntry[];
   filteredListings?: Listing[];
@@ -41,6 +41,14 @@ export interface HeartbeatResponse {
    * @deprecated Prefer local scheduler state (`schedulerPaused` / `isPaused`); may be removed in a future release.
    */
   paused?: boolean;
+}
+
+export interface HeartbeatOptions {
+  failureMsg?: string;
+  failureJobId?: number;
+  schedulerPaused: boolean;
+  activeJobId?: number | null;
+  ackCommandId?: string;
 }
 
 export class AgentApiClient {
@@ -110,12 +118,7 @@ export class AgentApiClient {
   async heartbeat(
     version: string,
     platform: string,
-    opts?: {
-      failureMsg?: string;
-      schedulerPaused: boolean;
-      activeJobId?: number | null;
-      ackCommandId?: string;
-    },
+    opts?: HeartbeatOptions,
   ): Promise<HeartbeatResponse> {
     const body: Record<string, unknown> = {
       version,
@@ -123,6 +126,7 @@ export class AgentApiClient {
       schedulerPaused: opts?.schedulerPaused ?? false,
     };
     if (opts?.failureMsg) body.failureMsg = opts.failureMsg;
+    if (opts?.failureJobId !== undefined) body.failureJobId = opts.failureJobId;
     if ("activeJobId" in (opts ?? {})) body.activeJobId = opts?.activeJobId ?? null;
     if (opts?.ackCommandId) body.ackCommandId = opts.ackCommandId;
     return this.request<HeartbeatResponse>("/api/agent/heartbeat", {

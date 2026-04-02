@@ -172,6 +172,7 @@ For a test build from a feature branch without tagging, go to **Actions → Rele
 ## Testing
 
 See [TESTING.md](TESTING.md) for the full manual and automated test checklist, including how to test the SEA binary, the auto-update flow, and what to verify after installing a new build.
+For the command, ACK, heartbeat, and Supabase Realtime contract specifically, see [docs/agent-command-lifecycle.md](docs/agent-command-lifecycle.md).
 
 ```bash
 # Unit tests (parser tests, runs in Node via Vitest)
