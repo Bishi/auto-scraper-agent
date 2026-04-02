@@ -142,17 +142,8 @@ async function mockInvoke(command, args = {}) {
   }
 }
 
-const tauriGlobal = window.__TAURI__ ?? null;
-const invoke = isBrowserMock
-  ? mockInvoke
-  : typeof tauriGlobal?.core?.invoke === "function"
-    ? tauriGlobal.core.invoke.bind(tauriGlobal.core)
-    : async () => null;
-const getAppVersion = isBrowserMock
-  ? async () => mockState.version
-  : typeof tauriGlobal?.app?.getVersion === "function"
-    ? () => tauriGlobal.app.getVersion()
-    : async () => null;
+const invoke = isBrowserMock ? mockInvoke : window.__TAURI__.core.invoke;
+const appApi = isBrowserMock ? { getVersion: async () => mockState.version } : window.__TAURI__.app;
 
 async function mockFetch(url, opts = {}) {
   const pathname = new URL(url, window.location.href).pathname;
@@ -205,8 +196,7 @@ async function mockFetch(url, opts = {}) {
 let sidecarToken = "";
 invoke("get_sidecar_token").then((t) => { if (t) sidecarToken = t; }).catch(() => {}).finally(() => { loadConfig(); });
 
-getAppVersion().then((v) => {
-  if (!v) return;
+appApi.getVersion().then((v) => {
   document.getElementById("version-badge").textContent = "v" + v;
 }).catch(() => {});
 
