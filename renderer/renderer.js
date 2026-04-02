@@ -207,8 +207,6 @@ function switchTab(name) {
   if (tabEl) {
     tabEl.classList.add("active");
     document.getElementById("panel-" + name).classList.add("active");
-    if (name === "logs") ensureInitialLogScroll();
-    if (name === "scraper") ensureInitialScraperLogScroll();
   }
 }
 
@@ -338,41 +336,17 @@ async function loadConfig() {
 const saveBtn = document.getElementById("save-btn");
 const errorEl = document.getElementById("error-msg");
 const successEl = document.getElementById("success-msg");
-const checkUpdateUptodate = document.getElementById("check-update-uptodate");
-const checkUpdateError = document.getElementById("check-update-error");
-const downloadProgress = document.getElementById("download-progress");
-const clearProfileError = document.getElementById("clear-profile-error");
-const clearProfileSuccess = document.getElementById("clear-profile-success");
-
-const feedbackAlerts = [
-  errorEl,
-  successEl,
-  checkUpdateUptodate,
-  checkUpdateError,
-  clearProfileError,
-  clearProfileSuccess,
-];
-
-function hideAllFeedback() {
-  feedbackAlerts.forEach((el) => {
-    el.style.display = "none";
-  });
-}
-
-function showFeedback(el) {
-  hideAllFeedback();
-  el.style.display = "block";
-}
 
 saveBtn.addEventListener("click", async () => {
-  hideAllFeedback();
+  errorEl.style.display = "none";
+  successEl.style.display = "none";
 
   const serverUrl = serverInput.value.trim();
   const apiKey = keyInput.value.trim();
 
   if (!serverUrl) {
     errorEl.textContent = "Server URL is required.";
-    showFeedback(errorEl);
+    errorEl.style.display = "block";
     return;
   }
 
@@ -381,11 +355,11 @@ saveBtn.addEventListener("click", async () => {
 
   try {
     await invoke("save_config", { apiKey, serverUrl });
-    showFeedback(successEl);
+    successEl.style.display = "block";
     await loadConfig();
   } catch (err) {
     errorEl.textContent = String(err);
-    showFeedback(errorEl);
+    errorEl.style.display = "block";
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = "Save";
@@ -411,7 +385,6 @@ const logBox = document.getElementById("log-box");
 let localLogs = [];
 let autoScroll = true;
 let lastLogKey = "";
-let logInitialPositioned = false;
 
 logBox.addEventListener("scroll", () => {
   const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
@@ -513,15 +486,6 @@ function renderLogs() {
   );
 }
 
-function ensureInitialLogScroll() {
-  if (logInitialPositioned) return;
-  requestAnimationFrame(() => {
-    logBox.scrollTop = logBox.scrollHeight;
-    autoScroll = true;
-    logInitialPositioned = true;
-  });
-}
-
 let clearedAt = 0;
 
 async function pollLogs() {
@@ -544,7 +508,6 @@ let scraperLogs = [];
 let scraperAutoScroll = true;
 let scraperLastKey = "";
 let scraperClearedAt = 0;
-let scraperLogInitialPositioned = false;
 
 scraperLogBox.addEventListener("scroll", () => {
   const atBottom = scraperLogBox.scrollHeight - scraperLogBox.scrollTop - scraperLogBox.clientHeight < 40;
@@ -561,15 +524,6 @@ function renderScraperLogs() {
     (value) => { scraperLastKey = value; },
     () => scraperAutoScroll,
   );
-}
-
-function ensureInitialScraperLogScroll() {
-  if (scraperLogInitialPositioned) return;
-  requestAnimationFrame(() => {
-    scraperLogBox.scrollTop = scraperLogBox.scrollHeight;
-    scraperAutoScroll = true;
-    scraperLogInitialPositioned = true;
-  });
 }
 
 async function pollScraperLogs() {
@@ -665,6 +619,8 @@ async function doStopScrape(btn) {
 stopScrapeBtn.addEventListener("click", () => doStopScrape(stopScrapeBtn));
 
 const clearProfileBtn = document.getElementById("clear-profile-btn");
+const clearProfileError = document.getElementById("clear-profile-error");
+const clearProfileSuccess = document.getElementById("clear-profile-success");
 
 function updateRunningState(running) {
   document.getElementById("run-scrape-btn").disabled = running;
@@ -673,21 +629,22 @@ function updateRunningState(running) {
 }
 
 clearProfileBtn.addEventListener("click", async () => {
-  hideAllFeedback();
+  clearProfileError.style.display = "none";
+  clearProfileSuccess.style.display = "none";
   clearProfileBtn.disabled = true;
   clearProfileBtn.textContent = "Clearing...";
   try {
     const res = await fetchTimeout(`${SIDECAR}/clear-profile`, 4000, { method: "POST" });
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      showFeedback(clearProfileSuccess);
+      clearProfileSuccess.style.display = "block";
     } else {
       clearProfileError.textContent = data.error ?? `Error ${res.status}`;
-      showFeedback(clearProfileError);
+      clearProfileError.style.display = "block";
     }
   } catch (err) {
     clearProfileError.textContent = String(err);
-    showFeedback(clearProfileError);
+    clearProfileError.style.display = "block";
   } finally {
     clearProfileBtn.disabled = false;
     clearProfileBtn.textContent = "Clear Browser Profile";
@@ -727,14 +684,15 @@ pollUpdateVersion();
 setInterval(pollUpdateVersion, 15 * 1000);
 
 const checkUpdateBtn = document.getElementById("check-update-btn");
+const checkUpdateUptodate = document.getElementById("check-update-uptodate");
+const checkUpdateError = document.getElementById("check-update-error");
+const downloadProgress = document.getElementById("download-progress");
 const downloadProgressText = document.getElementById("download-progress-text");
 const downloadProgressFill = document.getElementById("download-progress-fill");
 
 function renderDownloadProgress(progress) {
   if (!progress) {
-    if (downloadProgress.style.display !== "none") {
-      downloadProgress.style.display = "none";
-    }
+    downloadProgress.style.display = "none";
     downloadProgressText.textContent = "";
     downloadProgressFill.style.width = "0%";
     return;
@@ -754,7 +712,8 @@ setInterval(async () => {
 }, 1000);
 
 checkUpdateBtn.addEventListener("click", async () => {
-  hideAllFeedback();
+  checkUpdateUptodate.style.display = "none";
+  checkUpdateError.style.display = "none";
   checkUpdateBtn.disabled = true;
   checkUpdateBtn.textContent = "Checking...";
 
@@ -777,9 +736,9 @@ checkUpdateBtn.addEventListener("click", async () => {
         updateBadge.style.display = "inline-flex";
       } else if (err) {
         checkUpdateError.textContent = "Update check failed: " + err;
-        showFeedback(checkUpdateError);
+        checkUpdateError.style.display = "block";
       } else {
-        showFeedback(checkUpdateUptodate);
+        checkUpdateUptodate.style.display = "block";
       }
     } catch {}
   }, 500);
