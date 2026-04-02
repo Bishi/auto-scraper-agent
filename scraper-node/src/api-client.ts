@@ -36,9 +36,9 @@ export interface HeartbeatResponse {
   command?: string | null;
   commandId?: string | null;
   /**
-   * Echo of DB `paused` after the server applies `schedulerPaused` — redundant with what the agent
-   * already sent. Kept for backward compatibility and secondary sanity checks.
-   * @deprecated Prefer local scheduler state (`schedulerPaused` / `isPaused`); may be removed in a future release.
+   * Echo of DB `paused` after the server applies `schedulerPaused`.
+   * Kept only for short-term wire compatibility; the scheduler must not use this for state decisions.
+   * @deprecated Decision-making must rely on local scheduler state plus explicit commands.
    */
   paused?: boolean;
 }
