@@ -11,11 +11,13 @@ type Trigger = "startup" | "schedule" | "manual" | "server" | "resume";
 export class Scheduler {
   private scrapeTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatAckTimer: ReturnType<typeof setTimeout> | null = null;
   private realtimeWatcher: RealtimeWatcher | null = null;
   private _fireImmediateHeartbeat: (() => void) | null = null;
   private _running = false;
   private _paused = false;
   private _stopRequested = false;
+  private _started = false;
   private _version = "";
   /** Set when the server sends a check_update command; read+cleared by GET /update/check. */
   private _pendingUpdateCheck = false;
@@ -42,6 +44,7 @@ export class Scheduler {
   nextRunAt: number | null = null;
 
   start(client: AgentApiClient, version = ""): void {
+    this._started = true;
     this._version = version;
     this._paused = false;
     this.startHeartbeat(client);
@@ -71,10 +74,13 @@ export class Scheduler {
   stop(): void {
     if (this.scrapeTimer) clearTimeout(this.scrapeTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.heartbeatAckTimer) clearTimeout(this.heartbeatAckTimer);
     this.scrapeTimer = null;
     this.heartbeatTimer = null;
+    this.heartbeatAckTimer = null;
     this.nextRunAt = null;
     this._paused = false;
+    this._started = false;
     this._pendingAckCommandId = null;
     this.realtimeWatcher?.stop();
     this.realtimeWatcher = null;
@@ -153,9 +159,11 @@ export class Scheduler {
 
   private startHeartbeat(client: AgentApiClient): void {
     const beat = (): void => {
+      if (!this._started) return;
       client
         .heartbeat(this._version, process.platform, this.currentHeartbeatOptions())
         .then((res) => {
+          if (!this._started) return;
           // Drop local ack target once the server clears pending (same commandId no longer returned).
           if (this._pendingAckCommandId) {
             const stillPending = res.commandId === this._pendingAckCommandId;
@@ -235,7 +243,11 @@ export class Scheduler {
           // waiting up to 60 s for the next scheduled heartbeat. This clears
           // "Pausing…" / "Resuming…" on the dashboard almost immediately.
           if (this._pendingAckCommandId === res.commandId && res.commandId) {
-            setTimeout(() => beat(), 500);
+            if (this.heartbeatAckTimer) clearTimeout(this.heartbeatAckTimer);
+            this.heartbeatAckTimer = setTimeout(() => {
+              this.heartbeatAckTimer = null;
+              beat();
+            }, 500);
           }
         })
         .catch((err: unknown) => {

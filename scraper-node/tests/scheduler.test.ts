@@ -104,6 +104,36 @@ describe("Scheduler - heartbeat pause/resume", () => {
     );
     s.stop();
   });
+
+  it("cancels the follow-up ack heartbeat when stopped", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = mockClient();
+      (client.getSchedule as ReturnType<typeof vi.fn>).mockResolvedValue({
+        intervalMs: 30 * 60 * 1000,
+        jobs: [],
+      });
+      (client.getConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ modules: {} });
+      const hb = vi.fn().mockResolvedValue({
+        ok: true,
+        command: "pause",
+        commandId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+        paused: false,
+      });
+      (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+
+      const s = new Scheduler();
+      s.start(client as AgentApiClient, "1.0.0");
+
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(1));
+      s.stop();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(hb).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("Scheduler - job lifecycle reporting", () => {
