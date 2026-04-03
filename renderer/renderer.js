@@ -367,17 +367,34 @@ saveBtn.addEventListener("click", async () => {
 });
 
 const runScrapeBtn = document.getElementById("run-scrape-btn");
+const stopScrapeBtn = document.getElementById("stop-scrape-btn");
+const clearProfileBtn = document.getElementById("clear-profile-btn");
+let scraperRunning = false;
+let scrapeStartPending = false;
+let scrapeStopPending = false;
+
+function renderScrapeButtons() {
+  runScrapeBtn.disabled = scraperRunning || scrapeStartPending;
+  stopScrapeBtn.disabled = !scraperRunning || scrapeStopPending;
+  clearProfileBtn.disabled = scraperRunning;
+
+  runScrapeBtn.innerHTML = scrapeStartPending ? "&#9654; Starting..." : "&#9654; Run Scrape";
+  stopScrapeBtn.innerHTML = scrapeStopPending ? "&#9632; Stopping..." : "&#9632; Stop";
+}
+
+renderScrapeButtons();
 
 runScrapeBtn.addEventListener("click", async () => {
-  runScrapeBtn.disabled = true;
-  runScrapeBtn.textContent = "Starting...";
+  if (scraperRunning || scrapeStartPending) return;
+  scrapeStartPending = true;
+  renderScrapeButtons();
   try {
     await fetchTimeout(`${SIDECAR}/scrape/now`, 4000, { method: "POST" });
-  } catch {}
-  setTimeout(() => {
-    runScrapeBtn.disabled = false;
-    runScrapeBtn.innerHTML = "&#9654; Run Scrape";
-  }, 2000);
+    scraperRunning = true;
+  } catch {} finally {
+    scrapeStartPending = false;
+    renderScrapeButtons();
+  }
 });
 
 const logBox = document.getElementById("log-box");
@@ -603,29 +620,27 @@ pauseBtn.addEventListener("click", async () => {
   }
 });
 
-const stopScrapeBtn = document.getElementById("stop-scrape-btn");
-
 async function doStopScrape(btn) {
-  btn.disabled = true;
-  btn.textContent = "Stopping...";
+  if (!scraperRunning || scrapeStopPending) return;
+  scrapeStopPending = true;
+  renderScrapeButtons();
   try {
     await fetchTimeout(`${SIDECAR}/scrape/stop`, 4000, { method: "POST" });
-  } catch {}
-  setTimeout(() => {
-    btn.innerHTML = "&#9632; Stop";
-  }, 1500);
+  } catch {} finally {
+    scrapeStopPending = false;
+    renderScrapeButtons();
+  }
 }
 
 stopScrapeBtn.addEventListener("click", () => doStopScrape(stopScrapeBtn));
 
-const clearProfileBtn = document.getElementById("clear-profile-btn");
 const clearProfileError = document.getElementById("clear-profile-error");
 const clearProfileSuccess = document.getElementById("clear-profile-success");
 
 function updateRunningState(running) {
-  document.getElementById("run-scrape-btn").disabled = running;
-  stopScrapeBtn.disabled = !running;
-  clearProfileBtn.disabled = running;
+  scraperRunning = running;
+  if (!running) scrapeStartPending = false;
+  renderScrapeButtons();
 }
 
 clearProfileBtn.addEventListener("click", async () => {
