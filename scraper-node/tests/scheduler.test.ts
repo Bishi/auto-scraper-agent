@@ -12,6 +12,7 @@ function mockClient(): AgentApiClient {
     cancelJobs: vi.fn().mockResolvedValue(undefined),
     getConfig: vi.fn(),
     getSchedule: vi.fn(),
+    signalCycleVisibilityHint: vi.fn().mockResolvedValue(undefined),
     pushResults: vi.fn(),
     heartbeat: vi.fn().mockResolvedValue({ ok: true }),
     startJob: vi.fn().mockResolvedValue(undefined),
@@ -73,6 +74,32 @@ describe("Scheduler - triggerNow()", () => {
     );
     await s.triggerNow(client);
     expect(client.getSchedule).toHaveBeenCalledOnce();
+  });
+
+  it("sends the visibility hint for manual scrapes", async () => {
+    const s = new Scheduler();
+    const client = mockClient();
+    (client.getSchedule as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network error"));
+
+    await s.triggerNow(client, "manual");
+
+    expect(client.signalCycleVisibilityHint).toHaveBeenCalledOnce();
+  });
+
+  it("does not send the visibility hint for server-command scrapes", async () => {
+    const s = new Scheduler();
+    const client = mockClient();
+    (client.getSchedule as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network error"));
+
+    await (s as unknown as {
+      runCycle: (
+        c: AgentApiClient,
+        scheduleNext: boolean,
+        trigger: "server",
+      ) => Promise<void>;
+    }).runCycle(client, false, "server");
+
+    expect(client.signalCycleVisibilityHint).not.toHaveBeenCalled();
   });
 });
 

@@ -259,6 +259,15 @@ export class Scheduler {
     this.heartbeatTimer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
   }
 
+  private async sendCycleVisibilityHint(client: AgentApiClient, trigger: Trigger): Promise<void> {
+    if (trigger !== "manual" && trigger !== "schedule") return;
+    try {
+      await client.signalCycleVisibilityHint();
+    } catch (err: unknown) {
+      agentLogger.warn(`[agent] Failed to send cycle visibility hint: ${describeAgentApiError(err)}`);
+    }
+  }
+
   private async runCycle(client: AgentApiClient, scheduleNext = true, trigger: Trigger = "startup"): Promise<void> {
     if (this._running) return;
     this._running = true;
@@ -267,6 +276,7 @@ export class Scheduler {
     let intervalMs = 30 * 60 * 1000; // default 30 min
 
     try {
+      await this.sendCycleVisibilityHint(client, trigger);
       const [schedule, config] = await Promise.all([
         client.getSchedule(),
         client.getConfig(),

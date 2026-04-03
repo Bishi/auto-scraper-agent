@@ -372,6 +372,7 @@ const clearProfileBtn = document.getElementById("clear-profile-btn");
 let scraperRunning = false;
 let scrapeStartPending = false;
 let scrapeStopPending = false;
+let schedulePollTimer = null;
 
 function renderScrapeButtons() {
   runScrapeBtn.disabled = scraperRunning || scrapeStartPending;
@@ -384,16 +385,43 @@ function renderScrapeButtons() {
 
 renderScrapeButtons();
 
+function getSchedulePollIntervalMs() {
+  return scraperRunning || scrapeStartPending || scrapeStopPending ? 1_000 : 10_000;
+}
+
+function scheduleNextSchedulePoll(delay = getSchedulePollIntervalMs()) {
+  if (schedulePollTimer) clearTimeout(schedulePollTimer);
+  schedulePollTimer = setTimeout(() => {
+    schedulePollTimer = null;
+    void pollSchedule();
+  }, delay);
+}
+
+async function refreshScheduleSoon(attempts = 6, delayMs = 500) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await pollSchedule();
+    if ((scrapeStartPending && scraperRunning) || (scrapeStopPending && !scraperRunning)) {
+      break;
+    }
+    if (!scrapeStartPending && !scrapeStopPending) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
 runScrapeBtn.addEventListener("click", async () => {
   if (scraperRunning || scrapeStartPending) return;
   scrapeStartPending = true;
   renderScrapeButtons();
+  scheduleNextSchedulePoll(250);
   try {
     await fetchTimeout(`${SIDECAR}/scrape/now`, 4000, { method: "POST" });
-    scraperRunning = true;
+    await refreshScheduleSoon();
   } catch {} finally {
-    scrapeStartPending = false;
+    if (!scraperRunning) scrapeStartPending = false;
     renderScrapeButtons();
+    scheduleNextSchedulePoll();
   }
 });
 
@@ -603,11 +631,12 @@ async function pollSchedule() {
   } catch {
     scheduleText.textContent = "";
     statusDivider.style.display = "none";
+  } finally {
+    scheduleNextSchedulePoll();
   }
 }
 
-pollSchedule();
-setInterval(pollSchedule, 10000);
+void pollSchedule();
 
 pauseBtn.addEventListener("click", async () => {
   pauseBtn.disabled = true;
@@ -620,19 +649,24 @@ pauseBtn.addEventListener("click", async () => {
   }
 });
 
-async function doStopScrape(btn) {
+async function doStopScrape() {
   if (!scraperRunning || scrapeStopPending) return;
   scrapeStopPending = true;
   renderScrapeButtons();
+  scheduleNextSchedulePoll(250);
   try {
     await fetchTimeout(`${SIDECAR}/scrape/stop`, 4000, { method: "POST" });
+    await refreshScheduleSoon(10, 500);
   } catch {} finally {
-    scrapeStopPending = false;
+    if (scraperRunning) {
+      scrapeStopPending = false;
+    }
     renderScrapeButtons();
+    scheduleNextSchedulePoll();
   }
 }
 
-stopScrapeBtn.addEventListener("click", () => doStopScrape(stopScrapeBtn));
+stopScrapeBtn.addEventListener("click", () => doStopScrape());
 
 const clearProfileError = document.getElementById("clear-profile-error");
 const clearProfileSuccess = document.getElementById("clear-profile-success");
@@ -640,6 +674,7 @@ const clearProfileSuccess = document.getElementById("clear-profile-success");
 function updateRunningState(running) {
   scraperRunning = running;
   if (!running) scrapeStartPending = false;
+  if (!running) scrapeStopPending = false;
   renderScrapeButtons();
 }
 
