@@ -1,5 +1,24 @@
 import type { Listing, LogEntry, DbConfig, DiffSummary, DebugSnapshotData } from "./shared/types.js";
 
+function stringifyAgentApiError(err: unknown): string {
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  return String(err);
+}
+
+export function describeAgentApiError(err: unknown): string {
+  const raw = stringifyAgentApiError(err);
+  const normalized = raw.toLowerCase();
+  const isNetworkFetchFailure =
+    normalized.includes("typeerror: fetch failed") ||
+    normalized.includes("typeerror: failed to fetch");
+
+  if (isNetworkFetchFailure) {
+    return `could not connect to the server (${raw})`;
+  }
+
+  return raw;
+}
+
 export interface Schedule {
   intervalMs: number;
   jobs: Array<{ id: number; moduleName: string; scheduledAt: string }>;
