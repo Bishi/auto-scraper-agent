@@ -108,13 +108,6 @@ export class AgentApiClient {
     return this.request<Schedule>("/api/agent/schedule");
   }
 
-  async signalCycleVisibilityHint(): Promise<void> {
-    await this.request<{ ok: boolean }>("/api/agent/cycle-visibility-hint", {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-  }
-
   async cancelJobs(jobIds: number[]): Promise<void> {
     if (jobIds.length === 0) return;
     await this.request<{ ok: boolean }>("/api/agent/jobs/cancel", {
