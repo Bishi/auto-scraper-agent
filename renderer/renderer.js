@@ -379,8 +379,8 @@ function renderScrapeButtons() {
   stopScrapeBtn.disabled = !scraperRunning || scrapeStopPending;
   clearProfileBtn.disabled = scraperRunning;
 
-  runScrapeBtn.innerHTML = scrapeStartPending ? "&#9654; Starting..." : "&#9654; Run Scrape";
-  stopScrapeBtn.innerHTML = scrapeStopPending ? "&#9632; Stopping..." : "&#9632; Stop";
+  runScrapeBtn.innerHTML = "&#9654; Run Scrape";
+  stopScrapeBtn.innerHTML = "&#9632; Stop";
 }
 
 renderScrapeButtons();
