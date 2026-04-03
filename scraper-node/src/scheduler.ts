@@ -1,4 +1,4 @@
-import type { AgentApiClient } from "./api-client.js";
+import { describeAgentApiError, type AgentApiClient } from "./api-client.js";
 import { runModule } from "./scraper.js";
 import { agentLogger, pushScraperLogs } from "./logger.js";
 import type { DbConfig } from "./shared/types.js";
@@ -50,7 +50,7 @@ export class Scheduler {
     this.startHeartbeat(client);
     void this.runCycle(client, true, "startup");
 
-    // Start Realtime subscription non-blocking — if the server doesn't support
+    // Start Realtime subscription non-blocking - if the server doesn't support
     // it (old deploy, missing env var) the watcher logs a warning and we fall
     // back to the normal 60s heartbeat polling. Never block startup on this.
     client.getRealtimeToken()
@@ -67,7 +67,7 @@ export class Scheduler {
         void this.realtimeWatcher.start();
       })
       .catch((err: unknown) => {
-        agentLogger.warn(`[realtime] Unavailable — falling back to polling: ${String(err)}`);
+        agentLogger.warn(`[realtime] Unavailable - falling back to polling: ${String(err)}`);
       });
   }
 
@@ -91,7 +91,7 @@ export class Scheduler {
   stopScrape(): void {
     if (this._running) {
       this._stopRequested = true;
-      agentLogger.info("[agent] Stop requested — will halt after current module completes");
+      agentLogger.info("[agent] Stop requested - will halt after current module completes");
     } else {
       agentLogger.info("[agent] Stop requested but no scrape is in progress");
     }
@@ -123,13 +123,13 @@ export class Scheduler {
     this._pausedRemainingMs = null;
 
     this.nextRunAt = Date.now() + delay;
-    agentLogger.info(`[agent] Resumed — next scrape in ${Math.round(delay / 60_000)} min`);
+    agentLogger.info(`[agent] Resumed - next scrape in ${Math.round(delay / 60_000)} min`);
     this.scrapeTimer = setTimeout(() => void this.runCycle(client, true, "schedule"), delay);
   }
 
   async triggerNow(client: AgentApiClient, trigger: "manual" | "server" = "manual"): Promise<void> {
     if (this._running) {
-      agentLogger.info("[agent] Scrape already in progress — skipping manual trigger");
+      agentLogger.info("[agent] Scrape already in progress - skipping manual trigger");
       return;
     }
     // Clear existing timer so the 30-min clock resets from now
@@ -157,6 +157,65 @@ export class Scheduler {
     };
   }
 
+  private stageAck(commandId: string | null | undefined): void {
+    if (commandId) this._pendingAckCommandId = commandId;
+  }
+
+  private applyServerCommand(
+    client: AgentApiClient,
+    command: string | null | undefined,
+    commandId: string | null | undefined,
+  ): void {
+    if (!command || !commandId || commandId === this._pendingAckCommandId) return;
+
+    if (command === "scrape_now") {
+      if (!this._running) {
+        agentLogger.info("[agent] Server command: scrape_now");
+        void this.triggerNow(client, "server");
+        this.stageAck(commandId);
+      }
+      return;
+    }
+
+    if (command === "stop_scrape") {
+      this.stopScrape();
+      this.stageAck(commandId);
+      return;
+    }
+
+    if (command === "check_update") {
+      agentLogger.info("[agent] Server command: check_update");
+      this._pendingUpdateCheck = true;
+      this.stageAck(commandId);
+      return;
+    }
+
+    if (command === "pause") {
+      try {
+        if (!this._paused) {
+          this.pause();
+          agentLogger.info("[agent] Server command: pause");
+        }
+        this.stageAck(commandId);
+      } catch (err) {
+        agentLogger.error("[agent] Failed to apply pause command: " + String(err));
+      }
+      return;
+    }
+
+    if (command === "resume") {
+      try {
+        if (this._paused) {
+          agentLogger.info("[agent] Server command: resume");
+          this.resume(client);
+        }
+        this.stageAck(commandId);
+      } catch (err) {
+        agentLogger.error("[agent] Failed to apply resume command: " + String(err));
+      }
+    }
+  }
+
   private startHeartbeat(client: AgentApiClient): void {
     const beat = (): void => {
       if (!this._started) return;
@@ -171,68 +230,7 @@ export class Scheduler {
               this._pendingAckCommandId = null;
             }
           }
-
-          // scrape_now / stop_scrape / check_update — ack only after we apply locally (same id as pause/resume).
-          // Skip if _pendingAckCommandId already equals res.commandId — command was already applied,
-          // we're just waiting for the server to clear it. Prevents duplicate execution on echo.
-          if (res.command === "scrape_now" && res.commandId && res.commandId !== this._pendingAckCommandId) {
-            if (!this._running) {
-              agentLogger.info("[agent] Server command: scrape_now");
-              void this.triggerNow(client, "server");
-              this._pendingAckCommandId = res.commandId;
-            }
-            // If already running, do not ack — server keeps pending until next heartbeat.
-          }
-          if (res.command === "stop_scrape" && res.commandId && res.commandId !== this._pendingAckCommandId) {
-            this.stopScrape();
-            this._pendingAckCommandId = res.commandId;
-          }
-          if (res.command === "check_update" && res.commandId && res.commandId !== this._pendingAckCommandId) {
-            agentLogger.info("[agent] Server command: check_update");
-            this._pendingUpdateCheck = true;
-            this._pendingAckCommandId = res.commandId;
-          }
-
-          // Pause/resume with command id + ack — only set ack after local state applies successfully
-          // (so we never ack a command that threw before the scheduler reached the matching state).
-          if (res.command === "pause") {
-            try {
-              if (!this._paused) {
-                this.pause();
-                agentLogger.info("[agent] Server command: pause");
-              }
-              if (res.commandId) {
-                this._pendingAckCommandId = res.commandId;
-              }
-            } catch (err) {
-              agentLogger.error("[agent] Failed to apply pause command: " + String(err));
-            }
-          }
-          if (res.command === "resume") {
-            try {
-              if (this._paused) {
-                agentLogger.info("[agent] Server command: resume");
-                this.resume(client);
-              }
-              if (res.commandId) {
-                this._pendingAckCommandId = res.commandId;
-              }
-            } catch (err) {
-              agentLogger.error("[agent] Failed to apply resume command: " + String(err));
-            }
-          }
-
-          // Secondary sync from server echo — skip in the same tick as a pause/resume command,
-          // otherwise stale `res.paused` can undo a local pause before the next heartbeat sends schedulerPaused.
-          if (res.command !== "pause" && res.command !== "resume") {
-            if (res.paused === true && !this._paused) {
-              this.pause();
-              agentLogger.info("[agent] Scheduler paused (server echo)");
-            } else if (res.paused === false && this._paused) {
-              agentLogger.info("[agent] Scheduler resumed (server echo)");
-              this.resume(client);
-            }
-          }
+          this.applyServerCommand(client, res.command, res.commandId);
 
           // Keep the Realtime watcher's dedupe state in sync so it doesn't
           // fire a spurious immediate heartbeat for a command we just picked up.
@@ -241,7 +239,7 @@ export class Scheduler {
           // If this beat just set a pending ACK, fire a follow-up beat after a
           // short delay so the ACK reaches the server in ~500 ms rather than
           // waiting up to 60 s for the next scheduled heartbeat. This clears
-          // "Pausing…" / "Resuming…" on the dashboard almost immediately.
+          // "Pausing..." / "Resuming..." on the dashboard almost immediately.
           if (this._pendingAckCommandId === res.commandId && res.commandId) {
             if (this.heartbeatAckTimer) clearTimeout(this.heartbeatAckTimer);
             this.heartbeatAckTimer = setTimeout(() => {
@@ -251,7 +249,7 @@ export class Scheduler {
           }
         })
         .catch((err: unknown) => {
-          agentLogger.error("[agent] Heartbeat failed: " + String(err));
+          agentLogger.error("[agent] Heartbeat failed: " + describeAgentApiError(err));
         });
     };
     // Expose beat so RealtimeWatcher can fire an immediate heartbeat when a
@@ -308,7 +306,7 @@ export class Scheduler {
     const enabled = Object.entries(modules).filter(([, m]) => m.enabled);
 
     if (enabled.length === 0) {
-      agentLogger.info("[agent] No modules enabled — nothing to scrape");
+      agentLogger.info("[agent] No modules enabled - nothing to scrape");
       return;
     }
 
@@ -320,7 +318,7 @@ export class Scheduler {
       : "resume";
 
     const startedAt = new Date().toLocaleTimeString();
-    agentLogger.info(`[agent] ──────────── Scrape started @ ${startedAt} [${triggerLabel}] ────────────`);
+    agentLogger.info(`[agent] ------------ Scrape started @ ${startedAt} [${triggerLabel}] ------------`);
 
     const browserOptions = config.browser
       ? { headless: config.browser.headless ?? true, timeout: config.browser.timeout }
@@ -331,7 +329,7 @@ export class Scheduler {
     for (const [moduleName, moduleConfig] of enabled) {
       if (this._stopRequested) {
         this._stopRequested = false;
-        agentLogger.info("[agent] ──────────── Scrape halted by user request ────────────");
+        agentLogger.info("[agent] ------------ Scrape halted by user request ------------");
         const cancelIds = [...jobMap.values()].filter((id) => !startedJobIds.has(id));
         client.cancelJobs(cancelIds).catch((err: unknown) => {
           agentLogger.warn("[agent] Failed to cancel skipped jobs: " + String(err));
@@ -347,7 +345,7 @@ export class Scheduler {
         try {
           await client.startJob(jobId, moduleStartedAt.toISOString());
         } catch (err: unknown) {
-          const errMsg = String(err);
+          const errMsg = describeAgentApiError(err);
           agentLogger.error(`[agent] Failed to mark job ${jobId} as running: ${errMsg}`);
           Promise.resolve(client.heartbeat(
             this._version,
@@ -369,7 +367,7 @@ export class Scheduler {
         // Retry once immediately with the fresh profile instead of waiting
         // until the next scheduled cycle.
         if (result.hadManagedChallenge) {
-          agentLogger.info(`[agent] Retrying ${moduleName} with fresh browser profile…`);
+          agentLogger.info(`[agent] Retrying ${moduleName} with fresh browser profile...`);
           // Preserve snapshots from the original (failed) run so the dashboard
           // can show what Cloudflare returned, even if the retry succeeds.
           const originalSnapshots = result.debugSnapshots.map((s) => ({ ...s, preRetry: true }));
@@ -385,17 +383,39 @@ export class Scheduler {
           throw new Error(`Missing scheduled job id for module ${moduleName}`);
         }
 
-        const response = await client.pushResults({
-          moduleName,
-          jobId,
-          listings: result.listings,
-          logs: result.logs,
-          filteredListings: result.filteredListings,
-          failedUrls: result.failedUrls,
-          retried: wasRetried,
-          debugSnapshots: result.debugSnapshots,
-          startedAt: moduleStartedAt.toISOString(),
-        });
+        let response;
+        try {
+          response = await client.pushResults({
+            moduleName,
+            jobId,
+            listings: result.listings,
+            logs: result.logs,
+            filteredListings: result.filteredListings,
+            failedUrls: result.failedUrls,
+            retried: wasRetried,
+            debugSnapshots: result.debugSnapshots,
+            startedAt: moduleStartedAt.toISOString(),
+          });
+        } catch (err) {
+          const errMsg = describeAgentApiError(err);
+          const isRateLimited = errMsg.includes("Rate limited (429)");
+          if (isRateLimited) {
+            agentLogger.warn(`[agent] Rate limited by server - results not delivered for ${moduleName}. Will retry next scheduled run.`);
+          } else {
+            agentLogger.error(`[agent] Failed to push results for ${moduleName}: ${errMsg}`);
+          }
+          Promise.resolve(client.heartbeat(
+            this._version,
+            process.platform,
+            this.currentHeartbeatOptions({
+              failureMsg: errMsg,
+              failureJobId: jobId,
+            }),
+          )).catch(() => {});
+          this._activeJobId = null;
+          continue;
+        }
+
         this._activeJobId = null;
         const s = response.summary;
         agentLogger.info(
@@ -403,12 +423,7 @@ export class Scheduler {
         );
       } catch (err) {
         const errMsg = String(err);
-        const isRateLimited = errMsg.includes("Rate limited (429)");
-        if (isRateLimited) {
-          agentLogger.warn(`[agent] Rate limited by server — results not delivered for ${moduleName}. Will retry next scheduled run.`);
-        } else {
-          agentLogger.error(`[agent] Failed to scrape/push ${moduleName}: ` + errMsg);
-        }
+        agentLogger.error(`[agent] Failed to scrape ${moduleName}: ` + errMsg);
         Promise.resolve(client.heartbeat(
           this._version,
           process.platform,
@@ -422,6 +437,6 @@ export class Scheduler {
     }
 
     const finishedAt = new Date().toLocaleTimeString();
-    agentLogger.info(`[agent] ──────────── Scrape complete @ ${finishedAt} ────────────`);
+    agentLogger.info(`[agent] ------------ Scrape complete @ ${finishedAt} ------------`);
   }
 }

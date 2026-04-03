@@ -1,5 +1,24 @@
 import type { Listing, LogEntry, DbConfig, DiffSummary, DebugSnapshotData } from "./shared/types.js";
 
+function stringifyAgentApiError(err: unknown): string {
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  return String(err);
+}
+
+export function describeAgentApiError(err: unknown): string {
+  const raw = stringifyAgentApiError(err);
+  const normalized = raw.toLowerCase();
+  const isNetworkFetchFailure =
+    normalized.includes("typeerror: fetch failed") ||
+    normalized.includes("typeerror: failed to fetch");
+
+  if (isNetworkFetchFailure) {
+    return `could not connect to the server (${raw})`;
+  }
+
+  return raw;
+}
+
 export interface Schedule {
   intervalMs: number;
   jobs: Array<{ id: number; moduleName: string; scheduledAt: string }>;
@@ -36,9 +55,9 @@ export interface HeartbeatResponse {
   command?: string | null;
   commandId?: string | null;
   /**
-   * Echo of DB `paused` after the server applies `schedulerPaused` — redundant with what the agent
-   * already sent. Kept for backward compatibility and secondary sanity checks.
-   * @deprecated Prefer local scheduler state (`schedulerPaused` / `isPaused`); may be removed in a future release.
+   * Echo of DB `paused` after the server applies `schedulerPaused`.
+   * Kept only for short-term wire compatibility; the scheduler must not use this for state decisions.
+   * @deprecated Decision-making must rely on local scheduler state plus explicit commands.
    */
   paused?: boolean;
 }

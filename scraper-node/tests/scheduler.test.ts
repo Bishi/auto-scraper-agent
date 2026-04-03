@@ -134,6 +134,114 @@ describe("Scheduler - heartbeat pause/resume", () => {
       vi.useRealTimers();
     }
   });
+
+  it("acks stop_scrape even when no scrape is in progress", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = mockClient();
+      (client.getSchedule as ReturnType<typeof vi.fn>).mockResolvedValue({
+        intervalMs: 30 * 60 * 1000,
+        jobs: [],
+      });
+      (client.getConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ modules: {} });
+      const hb = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          command: "stop_scrape",
+          commandId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+          paused: false,
+        })
+        .mockResolvedValue({ ok: true, paused: false });
+      (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+
+      const s = new Scheduler();
+      s.start(client as AgentApiClient, "1.0.0");
+
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(600);
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(2));
+
+      expect(hb).toHaveBeenNthCalledWith(
+        2,
+        "1.0.0",
+        expect.any(String),
+        expect.objectContaining({
+          ackCommandId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+          activeJobId: null,
+        }),
+      );
+
+      s.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not pause the scheduler from heartbeat paused echo alone", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = mockClient();
+      (client.getSchedule as ReturnType<typeof vi.fn>).mockResolvedValue({
+        intervalMs: 30 * 60 * 1000,
+        jobs: [],
+      });
+      (client.getConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ modules: {} });
+      const hb = vi.fn().mockResolvedValue({ ok: true, paused: true });
+      (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+
+      const s = new Scheduler();
+      s.start(client as AgentApiClient, "1.0.0");
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(1));
+
+      expect(s.isPaused).toBe(false);
+      s.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("acks check_update after applying the server command once", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = mockClient();
+      (client.getSchedule as ReturnType<typeof vi.fn>).mockResolvedValue({
+        intervalMs: 30 * 60 * 1000,
+        jobs: [],
+      });
+      (client.getConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ modules: {} });
+      const hb = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          command: "check_update",
+          commandId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+        })
+        .mockResolvedValue({ ok: true });
+      (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+
+      const s = new Scheduler();
+      s.start(client as AgentApiClient, "1.0.0");
+
+      await vi.waitFor(() => expect(s.consumeUpdateCheck()).toBe(true));
+      await vi.advanceTimersByTimeAsync(600);
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(2));
+
+      expect(hb).toHaveBeenNthCalledWith(
+        2,
+        "1.0.0",
+        expect.any(String),
+        expect.objectContaining({
+          ackCommandId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+          activeJobId: null,
+        }),
+      );
+
+      s.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("Scheduler - job lifecycle reporting", () => {
