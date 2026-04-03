@@ -73,6 +73,29 @@ describe("proteini-si parser", () => {
     });
   });
 
+  describe("discontinued product", () => {
+    it("prefers visible discontinued text over the meta availability tag", () => {
+      const html = `<html><body>
+        <h1 class="h1-title">Snickers Hi Protein Powder</h1>
+        <div class="price-holder">
+          <span class="price">39,99 €</span>
+        </div>
+        <div class="notice">Izdelek ni več v prodaji</div>
+        <meta itemprop="availability" content="Na zalogi">
+      </body></html>`;
+
+      const listing = parseProduct(
+        html,
+        "https://www.proteini.si/sl/products/snickers-hi-protein-powder-480g",
+      );
+
+      expect(listing).not.toBeNull();
+      expect(listing!.metadata["inStock"]).toBe(0);
+      expect(listing!.metadata["availability"]).toBe("Izdelek ni več v prodaji");
+      expect(listing!.sourceId).toBe("snickers-hi-protein-powder-480g");
+    });
+  });
+
   describe("price parsing", () => {
     it("parses '32,99 €' → 32.99 (comma decimal, euro symbol)", () => {
       const listing = parseProduct(fixture("in-stock.html"), PRODUCT_URL);
@@ -116,6 +139,19 @@ describe("proteini-si parser", () => {
       const listing = parseProduct(html, PRODUCT_URL);
       expect(listing!.metadata["inStock"]).toBe(0);
       expect(listing!.metadata["availability"]).toBeNull();
+    });
+
+    it("does not mislabel ordinary out-of-stock text as discontinued", () => {
+      const html = `<html><body>
+        <h1 class="h1-title">Some Product</h1>
+        <div class="price-holder"><span class="price">9,99 €</span></div>
+        <div>Ni na zalogi</div>
+        <meta itemprop="availability" content="Ni na zalogi">
+      </body></html>`;
+      const listing = parseProduct(html, PRODUCT_URL);
+      expect(listing).not.toBeNull();
+      expect(listing!.metadata["inStock"]).toBe(0);
+      expect(listing!.metadata["availability"]).toBe("Ni na zalogi");
     });
   });
 });

@@ -4,6 +4,8 @@ import type { Listing } from "../../types.js";
 import { SELECTORS } from "./selectors.js";
 
 const MODULE_NAME = "proteini-si";
+const DISCONTINUED_AVAILABILITY = "Izdelek ni ve\u010d v prodaji";
+const DISCONTINUED_MATCH = "izdelek ni ve\u010d v prodaji";
 
 export function parseProduct(html: string, url: string): Listing | null {
   const $ = cheerio.load(html);
@@ -15,7 +17,12 @@ export function parseProduct(html: string, url: string): Listing | null {
   const price = parsePrice(priceText);
 
   const availContent = $(SELECTORS.availability).attr("content") ?? "";
-  const inStock: 0 | 1 = availContent === "Na zalogi" ? 1 : 0;
+  const bodyText = normalizeText($("body").text());
+  const isDiscontinued = bodyText.includes(DISCONTINUED_MATCH);
+  const availability = isDiscontinued
+    ? DISCONTINUED_AVAILABILITY
+    : (availContent || null);
+  const inStock: 0 | 1 = !isDiscontinued && availContent === "Na zalogi" ? 1 : 0;
 
   // sourceId = last non-empty path segment of the URL
   const urlObj = new URL(url);
@@ -27,7 +34,7 @@ export function parseProduct(html: string, url: string): Listing | null {
 
   const metadata: Record<string, string | number | boolean | null> = {
     inStock,
-    availability: availContent || null,
+    availability,
   };
 
   const contentHash = computeHash(title, price, inStock);
@@ -45,6 +52,10 @@ export function parseProduct(html: string, url: string): Listing | null {
     firstSeenAt: now,
     lastSeenAt: now,
   };
+}
+
+function normalizeText(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function parsePrice(text: string): number | null {
