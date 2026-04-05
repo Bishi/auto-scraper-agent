@@ -105,6 +105,13 @@ export abstract class ScraperModule {
             await p.waitForTimeout(delay);
 
             const scraped = await this.scrape(p, pageUrl);
+            // Always associate listings with the base monitoring URL, not the
+            // paginated page URL. Parsers receive the page URL for context but
+            // the server matches listings to config URLs via sourceUrl — using
+            // a page-specific URL breaks disabled/failed URL exclusion.
+            for (const listing of scraped) {
+              listing.sourceUrl = urlEntry.url;
+            }
             const listings = applyPriceFilter(scraped, urlEntry.filters);
             const filteredOut = scraped.length - listings.length;
 
@@ -186,6 +193,13 @@ export abstract class ScraperModule {
             await page.waitForTimeout(delay);
 
             const scraped = await this.scrape(page, pageUrl);
+            // Always associate listings with the base monitoring URL, not the
+            // paginated page URL. Parsers receive the page URL for context but
+            // the server matches listings to config URLs via sourceUrl — using
+            // a page-specific URL breaks disabled/failed URL exclusion.
+            for (const listing of scraped) {
+              listing.sourceUrl = urlEntry.url;
+            }
             const listings = applyPriceFilter(scraped, urlEntry.filters);
             const filteredOut = scraped.length - listings.length;
 
