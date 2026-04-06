@@ -28,8 +28,8 @@ export class Scheduler {
   private _pausedRemainingMs: number | null = null;
   /** Outstanding pause/resume command id to ack on the next heartbeat(s) until the server clears pending. */
   private _pendingAckCommandId: string | null = null;
-  /** Job ID currently being scraped, or null when idle. Sent in every heartbeat for server reconciliation. */
-  private _activeJobId: number | null = null;
+  /** Job public id currently being scraped, or null when idle. Sent in every heartbeat for server reconciliation. */
+  private _activeJobPublicId: string | null = null;
   /** True while a scrape cycle is actively executing. */
   get isRunning(): boolean { return this._running; }
   /** True when the scheduler is paused (heartbeat continues but scrapes are suspended). */
@@ -140,20 +140,20 @@ export class Scheduler {
 
   private currentHeartbeatOptions(extra: {
     failureMsg?: string;
-    failureJobId?: number;
+    failureJobPublicId?: string;
   } = {}): {
     schedulerPaused: boolean;
-    activeJobId: number | null;
+    activeJobPublicId: string | null;
     ackCommandId?: string;
     failureMsg?: string;
-    failureJobId?: number;
+    failureJobPublicId?: string;
   } {
     return {
       schedulerPaused: this._paused,
-      activeJobId: this._activeJobId,
+      activeJobPublicId: this._activeJobPublicId,
       ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
       ...(extra.failureMsg ? { failureMsg: extra.failureMsg } : {}),
-      ...(extra.failureJobId !== undefined ? { failureJobId: extra.failureJobId } : {}),
+      ...(extra.failureJobPublicId !== undefined ? { failureJobPublicId: extra.failureJobPublicId } : {}),
     };
   }
 
@@ -273,7 +273,7 @@ export class Scheduler {
       ]);
 
       intervalMs = schedule.intervalMs;
-      const jobMap = new Map(schedule.jobs.map((j) => [j.moduleName, j.id]));
+      const jobMap = new Map(schedule.jobs.map((j) => [j.moduleName, j.publicId]));
 
       await this.scrapeAll(client, config, jobMap, trigger);
     } catch (err) {
@@ -299,7 +299,7 @@ export class Scheduler {
   private async scrapeAll(
     client: AgentApiClient,
     config: DbConfig,
-    jobMap: Map<string, number>,
+    jobMap: Map<string, string>,
     trigger: Trigger,
   ): Promise<void> {
     const modules = config.modules ?? {};
@@ -324,13 +324,13 @@ export class Scheduler {
       ? { headless: config.browser.headless ?? true, timeout: config.browser.timeout }
       : undefined;
 
-    const startedJobIds = new Set<number>();
+    const startedJobPublicIds = new Set<string>();
 
     for (const [moduleName, moduleConfig] of enabled) {
       if (this._stopRequested) {
         this._stopRequested = false;
         agentLogger.info("[agent] ------------ Scrape halted by user request ------------");
-        const cancelIds = [...jobMap.values()].filter((id) => !startedJobIds.has(id));
+        const cancelIds = [...jobMap.values()].filter((id) => !startedJobPublicIds.has(id));
         client.cancelJobs(cancelIds).catch((err: unknown) => {
           agentLogger.warn("[agent] Failed to cancel skipped jobs: " + String(err));
         });
@@ -338,24 +338,24 @@ export class Scheduler {
       }
       agentLogger.info(`[agent] Scraping ${moduleName}...`);
       const moduleStartedAt = new Date();
-      const jobId = jobMap.get(moduleName);
-      if (jobId !== undefined) {
-        startedJobIds.add(jobId);
-        this._activeJobId = jobId;
+      const jobPublicId = jobMap.get(moduleName);
+      if (jobPublicId !== undefined) {
+        startedJobPublicIds.add(jobPublicId);
+        this._activeJobPublicId = jobPublicId;
         try {
-          await client.startJob(jobId, moduleStartedAt.toISOString());
+          await client.startJob(jobPublicId, moduleStartedAt.toISOString());
         } catch (err: unknown) {
           const errMsg = describeAgentApiError(err);
-          agentLogger.error(`[agent] Failed to mark job ${jobId} as running: ${errMsg}`);
+          agentLogger.error(`[agent] Failed to mark job ${jobPublicId} as running: ${errMsg}`);
           Promise.resolve(client.heartbeat(
             this._version,
             process.platform,
             this.currentHeartbeatOptions({
-              failureMsg: `Failed to start job ${jobId}: ${errMsg}`,
-              failureJobId: jobId,
+              failureMsg: `Failed to start job ${jobPublicId}: ${errMsg}`,
+              failureJobPublicId: jobPublicId,
             }),
           )).catch(() => {});
-          this._activeJobId = null;
+          this._activeJobPublicId = null;
           continue;
         }
       }
@@ -379,15 +379,15 @@ export class Scheduler {
         // Push scraper module logs into the Scraper tab buffer.
         pushScraperLogs(moduleName, result.logs);
 
-        if (jobId === undefined) {
-          throw new Error(`Missing scheduled job id for module ${moduleName}`);
+        if (jobPublicId === undefined) {
+          throw new Error(`Missing scheduled job public id for module ${moduleName}`);
         }
 
         let response;
         try {
           response = await client.pushResults({
             moduleName,
-            jobId,
+            jobPublicId,
             listings: result.listings,
             logs: result.logs,
             filteredListings: result.filteredListings,
@@ -409,14 +409,14 @@ export class Scheduler {
             process.platform,
             this.currentHeartbeatOptions({
               failureMsg: errMsg,
-              failureJobId: jobId,
+              failureJobPublicId: jobPublicId,
             }),
           )).catch(() => {});
-          this._activeJobId = null;
+          this._activeJobPublicId = null;
           continue;
         }
 
-        this._activeJobId = null;
+        this._activeJobPublicId = null;
         const s = response.summary;
         agentLogger.info(
           `[agent] ${moduleName}: total=${s.total} new=${s.new} changed=${s.changed} removed=${s.removed}`,
@@ -429,10 +429,10 @@ export class Scheduler {
           process.platform,
           this.currentHeartbeatOptions({
             failureMsg: errMsg,
-            ...(jobId !== undefined ? { failureJobId: jobId } : {}),
+            ...(jobPublicId !== undefined ? { failureJobPublicId: jobPublicId } : {}),
           }),
         )).catch(() => {});
-        this._activeJobId = null;
+        this._activeJobPublicId = null;
       }
     }
 

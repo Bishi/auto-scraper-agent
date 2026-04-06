@@ -21,12 +21,12 @@ export function describeAgentApiError(err: unknown): string {
 
 export interface Schedule {
   intervalMs: number;
-  jobs: Array<{ id: number; moduleName: string; scheduledAt: string }>;
+  jobs: Array<{ publicId: string; moduleName: string; scheduledAt: string }>;
 }
 
 export interface PushResultsParams {
   moduleName: string;
-  jobId: number;
+  jobPublicId: string;
   listings: Listing[];
   logs: LogEntry[];
   filteredListings?: Listing[];
@@ -64,9 +64,9 @@ export interface HeartbeatResponse {
 
 export interface HeartbeatOptions {
   failureMsg?: string;
-  failureJobId?: number;
+  failureJobPublicId?: string;
   schedulerPaused: boolean;
-  activeJobId?: number | null;
+  activeJobPublicId?: string | null;
   ackCommandId?: string;
 }
 
@@ -108,16 +108,17 @@ export class AgentApiClient {
     return this.request<Schedule>("/api/agent/schedule");
   }
 
-  async cancelJobs(jobIds: number[]): Promise<void> {
-    if (jobIds.length === 0) return;
+  async cancelJobs(jobPublicIds: string[]): Promise<void> {
+    if (jobPublicIds.length === 0) return;
     await this.request<{ ok: boolean }>("/api/agent/jobs/cancel", {
       method: "POST",
-      body: JSON.stringify({ jobIds }),
+      body: JSON.stringify({ jobPublicIds }),
     });
   }
 
-  async startJob(jobId: number, startedAt: string): Promise<void> {
-    await this.request<{ ok: boolean }>(`/api/agent/jobs/${jobId}/start`, {
+  async startJob(jobPublicId: string, startedAt: string): Promise<void> {
+    const enc = encodeURIComponent(jobPublicId);
+    await this.request<{ ok: boolean }>(`/api/agent/jobs/${enc}/start`, {
       method: "POST",
       body: JSON.stringify({ startedAt }),
     });
@@ -145,8 +146,8 @@ export class AgentApiClient {
       schedulerPaused: opts?.schedulerPaused ?? false,
     };
     if (opts?.failureMsg) body.failureMsg = opts.failureMsg;
-    if (opts?.failureJobId !== undefined) body.failureJobId = opts.failureJobId;
-    if ("activeJobId" in (opts ?? {})) body.activeJobId = opts?.activeJobId ?? null;
+    if (opts?.failureJobPublicId !== undefined) body.failureJobPublicId = opts.failureJobPublicId;
+    if ("activeJobPublicId" in (opts ?? {})) body.activeJobPublicId = opts?.activeJobPublicId ?? null;
     if (opts?.ackCommandId) body.ackCommandId = opts.ackCommandId;
     return this.request<HeartbeatResponse>("/api/agent/heartbeat", {
       method: "POST",

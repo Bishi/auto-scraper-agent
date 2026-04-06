@@ -168,7 +168,7 @@ describe("Scheduler - heartbeat pause/resume", () => {
         expect.any(String),
         expect.objectContaining({
           ackCommandId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-          activeJobId: null,
+          activeJobPublicId: null,
         }),
       );
 
@@ -233,7 +233,7 @@ describe("Scheduler - heartbeat pause/resume", () => {
         expect.any(String),
         expect.objectContaining({
           ackCommandId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-          activeJobId: null,
+          activeJobPublicId: null,
         }),
       );
 
@@ -249,11 +249,12 @@ describe("Scheduler - job lifecycle reporting", () => {
     vi.clearAllMocks();
   });
 
-  it("reports startup failure against the specific job id", async () => {
+  it("reports startup failure against the specific job public id", async () => {
     const s = new Scheduler();
     const client = mockClient();
     const heartbeat = client.heartbeat as ReturnType<typeof vi.fn>;
     const startJob = client.startJob as ReturnType<typeof vi.fn>;
+    const jobPublicId = "bbbbbbbbbbbb";
 
     startJob.mockRejectedValue(new Error("start failed"));
     (client.getConfig as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -264,17 +265,17 @@ describe("Scheduler - job lifecycle reporting", () => {
       scrapeAll: (
         c: AgentApiClient,
         config: { modules: Record<string, { enabled: boolean }> },
-        jobMap: Map<string, number>,
+        jobMap: Map<string, string>,
         trigger: "manual",
       ) => Promise<void>;
     }).scrapeAll(
       client,
       { modules: { bolha: { enabled: true } } },
-      new Map([["bolha", 42]]),
+      new Map([["bolha", jobPublicId]]),
       "manual",
     );
 
-    expect(startJob).toHaveBeenCalledWith(42, expect.any(String));
+    expect(startJob).toHaveBeenCalledWith(jobPublicId, expect.any(String));
     expect(runModuleMock).not.toHaveBeenCalled();
     expect(client.pushResults).not.toHaveBeenCalled();
     expect(heartbeat).toHaveBeenCalledWith(
@@ -282,16 +283,17 @@ describe("Scheduler - job lifecycle reporting", () => {
       expect.any(String),
       expect.objectContaining<HeartbeatOptions>({
         schedulerPaused: false,
-        activeJobId: 42,
-        failureJobId: 42,
+        activeJobPublicId: jobPublicId,
+        failureJobPublicId: jobPublicId,
       }),
     );
   });
 
-  it("reports scrape or result failure with the active job id before clearing it", async () => {
+  it("reports scrape or result failure with the active job public id before clearing it", async () => {
     const s = new Scheduler();
     const client = mockClient();
     const heartbeat = client.heartbeat as ReturnType<typeof vi.fn>;
+    const jobPublicId = "cccccccccccc";
 
     runModuleMock.mockResolvedValue({
       hadManagedChallenge: false,
@@ -307,20 +309,20 @@ describe("Scheduler - job lifecycle reporting", () => {
       scrapeAll: (
         c: AgentApiClient,
         config: { modules: Record<string, { enabled: boolean }> },
-        jobMap: Map<string, number>,
+        jobMap: Map<string, string>,
         trigger: "manual",
       ) => Promise<void>;
     }).scrapeAll(
       client,
       { modules: { bolha: { enabled: true } } },
-      new Map([["bolha", 77]]),
+      new Map([["bolha", jobPublicId]]),
       "manual",
     );
 
-    expect(client.startJob).toHaveBeenCalledWith(77, expect.any(String));
+    expect(client.startJob).toHaveBeenCalledWith(jobPublicId, expect.any(String));
     expect(client.pushResults).toHaveBeenCalledWith(
       expect.objectContaining({
-        jobId: 77,
+        jobPublicId,
         moduleName: "bolha",
       }),
     );
@@ -329,10 +331,10 @@ describe("Scheduler - job lifecycle reporting", () => {
       expect.any(String),
       expect.objectContaining<HeartbeatOptions>({
         schedulerPaused: false,
-        activeJobId: 77,
-        failureJobId: 77,
+        activeJobPublicId: jobPublicId,
+        failureJobPublicId: jobPublicId,
       }),
     );
-    expect((s as unknown as { _activeJobId: number | null })._activeJobId).toBeNull();
+    expect((s as unknown as { _activeJobPublicId: string | null })._activeJobPublicId).toBeNull();
   });
 });
