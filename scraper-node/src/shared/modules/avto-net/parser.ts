@@ -48,7 +48,7 @@ export function parseListings(html: string, sourceUrl: string): Listing[] {
       if (label && value) tableData[label] = value;
     });
 
-    // Known Slovenian labels: "1.registracija", "prevoženih", "gorivo", "menjalnik", "motor"
+    // Known Slovenian labels: "1.registracija", "prevoženih", "gorivo", "menjalnik", "motor", "baterija"
     const metadata: Record<string, string | number | null> = {
       year: parseYear(tableData["1.registracija"] ?? null),
       mileage: parseMileageKm(tableData["prevoženih"] ?? null),
@@ -57,6 +57,8 @@ export function parseListings(html: string, sourceUrl: string): Listing[] {
       engine: tableData["motor"] ?? null,
       originalPrice: originalPrice,
       onSale: salePriceText ? 1 : 0,
+      // Only include battery when present — omitting the key keeps non-EV contentHash unchanged.
+      ...(tableData["baterija"] ? { battery: tableData["baterija"] } : {}),
     };
 
     // Normalize URL: remove relative path segments like "../"

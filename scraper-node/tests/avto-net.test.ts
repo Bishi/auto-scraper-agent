@@ -141,6 +141,47 @@ describe("avto-net parser", () => {
     });
   });
 
+  describe("EV (electric vehicle) listing", () => {
+    it("stores battery for EV listing from 'Baterija' label", () => {
+      const [ev] = parseListings(fixture("ev.html"), SOURCE_URL);
+      expect(ev!.metadata["battery"]).toBe("49 kWh");
+    });
+
+    it("preserves electric engine as-is (no KM, so 208 kW stays)", () => {
+      const [ev] = parseListings(fixture("ev.html"), SOURCE_URL);
+      expect(ev!.metadata["engine"]).toBe("208 kW");
+    });
+
+    it("keeps transmission null for EV when no Menjalnik row is present", () => {
+      const [ev] = parseListings(fixture("ev.html"), SOURCE_URL);
+      expect(ev!.metadata["transmission"]).toBeNull();
+    });
+
+    it("stores fuel as elektro pogon", () => {
+      const [ev] = parseListings(fixture("ev.html"), SOURCE_URL);
+      expect(ev!.metadata["fuel"]).toBe("elektro pogon");
+    });
+
+    it("omits battery key entirely for non-EV listing without Baterija", () => {
+      const listings = parseListings(fixture("ev.html"), SOURCE_URL);
+      const nonEv = listings[1]!;
+      expect("battery" in nonEv.metadata).toBe(false);
+    });
+
+    it("non-EV contentHash does not change when only EV gets battery", () => {
+      // Parse the EV fixture; the non-EV row must not have battery in its hash input.
+      const listings = parseListings(fixture("ev.html"), SOURCE_URL);
+      const nonEv = listings[1]!;
+      // Verify battery is absent from the metadata object — it will not affect the hash.
+      expect(Object.keys(nonEv.metadata)).not.toContain("battery");
+    });
+
+    it("EV and non-EV from same fixture produce different contentHashes", () => {
+      const [ev, nonEv] = parseListings(fixture("ev.html"), SOURCE_URL);
+      expect(ev!.contentHash).not.toBe(nonEv!.contentHash);
+    });
+  });
+
   describe("edge cases", () => {
     it("returns empty array when no listing rows present", () => {
       const listings = parseListings(
