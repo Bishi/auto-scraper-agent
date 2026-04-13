@@ -13,7 +13,7 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use tauri::{
-    AppHandle, Manager, Runtime, WindowEvent,
+    AppHandle, Manager, PhysicalPosition, PhysicalSize, Position, Runtime, Size, WindowEvent,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     menu::{Menu, MenuEvent, MenuItem},
     window::Color,
@@ -767,23 +767,20 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
     .min_inner_size(760.0, 620.0)
     .resizable(true);
 
-    let builder = if let Some(saved) = &saved_window_state {
-        builder
-            .inner_size(saved.width as f64, saved.height as f64)
-            .position(saved.x as f64, saved.y as f64)
-    } else {
-        builder
-            .inner_size(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
-            .center()
-    };
+    let builder = builder
+        .inner_size(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
 
     if let Ok(window) = builder.build() {
         attach_setup_window_state_listener(app, &window);
         if let Some(saved) = saved_window_state {
+            let _ = window.set_size(Size::Physical(PhysicalSize::new(saved.width, saved.height)));
+            let _ = window.set_position(Position::Physical(PhysicalPosition::new(saved.x, saved.y)));
             if saved.maximized {
                 let _ = window.maximize();
                 schedule_setup_window_state_persist(app, Duration::from_millis(75));
             }
+        } else {
+            let _ = window.center();
         }
     }
 }
