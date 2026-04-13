@@ -765,7 +765,8 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
     .decorations(false)
     .background_color(Color(9, 17, 28, 255))
     .min_inner_size(760.0, 620.0)
-    .resizable(true);
+    .resizable(true)
+    .visible(false);
 
     let builder = builder
         .inner_size(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
@@ -782,6 +783,8 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
         } else {
             let _ = window.center();
         }
+        let _ = window.show();
+        let _ = window.set_focus();
     }
 }
 
