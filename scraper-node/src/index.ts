@@ -2,7 +2,7 @@ import http from "node:http";
 import { rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { readConfig, writeConfig } from "./store.js";
+import { readConfig, updateConfig, writeConfig } from "./store.js";
 import { AgentApiClient } from "./api-client.js";
 import { Scheduler } from "./scheduler.js";
 import { SIDECAR_TOKEN, isAuthorized } from "./auth.js";
@@ -17,14 +17,16 @@ process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.6.28";
+const AGENT_VERSION = "0.6.29";
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
 let client: AgentApiClient | null = null;
-const scheduler = new Scheduler();
+const scheduler = new Scheduler((paused) => {
+  updateConfig({ schedulerPaused: paused });
+});
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -158,7 +160,7 @@ const server = http.createServer((req, res) => {
         writeConfig({ apiKey: resolvedKey, serverUrl });
         client = new AgentApiClient(serverUrl, resolvedKey);
         scheduler.stop();
-        scheduler.start(client, AGENT_VERSION);
+        scheduler.start(client, AGENT_VERSION, previous?.schedulerPaused ?? false);
 
         const keyTail =
           resolvedKey.length >= 4 ? resolvedKey.slice(-4) : "????";
@@ -266,7 +268,7 @@ const storedConfig = readConfig();
 if (storedConfig) {
   agentLogger.info(`[agent] Loaded saved config: serverUrl=${storedConfig.serverUrl}`);
   client = new AgentApiClient(storedConfig.serverUrl, storedConfig.apiKey);
-  scheduler.start(client, AGENT_VERSION);
+  scheduler.start(client, AGENT_VERSION, storedConfig.schedulerPaused ?? false);
 } else {
   agentLogger.info("[agent] No saved config. POST http://127.0.0.1:9001/config with { apiKey, serverUrl } to start.");
 }

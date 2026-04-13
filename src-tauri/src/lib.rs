@@ -1,7 +1,7 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -13,7 +13,7 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 use tauri::{
-    AppHandle, Manager, Runtime,
+    AppHandle, Manager, Runtime, WindowEvent,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     menu::{Menu, MenuEvent, MenuItem},
     window::Color,
@@ -22,7 +22,7 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::menu::PredefinedMenuItem;
 
 // Prevents two concurrent update flows (startup check + manual "Check for Updates" click).
@@ -40,6 +40,22 @@ static DOWNLOAD_PROGRESS: Mutex<Option<String>> = Mutex::new(None);
 // Captured from sidecar stdout by the watchdog and required on every HTTP request
 // to the sidecar (except OPTIONS preflights and the /health endpoint).
 static SIDECAR_TOKEN: Mutex<Option<String>> = Mutex::new(None);
+// Monotonic ticket used to debounce window-state disk writes during drag/resize.
+static WINDOW_STATE_SAVE_TICKET: AtomicU64 = AtomicU64::new(0);
+const DEFAULT_WINDOW_WIDTH: f64 = 860.0;
+const DEFAULT_WINDOW_HEIGHT: f64 = 702.0;
+const MIN_WINDOW_WIDTH: u32 = 760;
+const MIN_WINDOW_HEIGHT: u32 = 620;
+const WINDOW_STATE_SAVE_DEBOUNCE_MS: u64 = 400;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct SetupWindowState {
+    width: u32,
+    height: u32,
+    x: i32,
+    y: i32,
+    maximized: bool,
+}
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -114,10 +130,12 @@ fn window_minimize(window: tauri::WebviewWindow) -> Result<(), String> {
 #[tauri::command]
 fn window_toggle_maximize(window: tauri::WebviewWindow) -> Result<(), String> {
     if window.is_maximized().map_err(|e| e.to_string())? {
-        window.unmaximize().map_err(|e| e.to_string())
+        window.unmaximize().map_err(|e| e.to_string())?;
     } else {
-        window.maximize().map_err(|e| e.to_string())
+        window.maximize().map_err(|e| e.to_string())?;
     }
+    schedule_setup_window_state_persist(&window.app_handle(), Duration::from_millis(75));
+    Ok(())
 }
 
 #[tauri::command]
@@ -194,6 +212,126 @@ fn get_download_progress() -> Option<String> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn setup_window_state_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    app.path()
+        .home_dir()
+        .ok()
+        .map(|home| home.join(".auto-scraper").join("window-state.json"))
+}
+
+fn is_valid_setup_window_state(state: &SetupWindowState) -> bool {
+    state.width >= MIN_WINDOW_WIDTH
+        && state.height >= MIN_WINDOW_HEIGHT
+        && state.x.abs() <= 50_000
+        && state.y.abs() <= 50_000
+}
+
+fn load_setup_window_state<R: Runtime>(app: &AppHandle<R>) -> Option<SetupWindowState> {
+    let path = setup_window_state_path(app)?;
+    let raw = fs::read_to_string(path).ok()?;
+    let parsed = serde_json::from_str::<SetupWindowState>(&raw).ok()?;
+    if is_valid_setup_window_state(&parsed) {
+        Some(parsed)
+    } else {
+        None
+    }
+}
+
+fn write_setup_window_state<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &SetupWindowState,
+) -> Result<(), String> {
+    let path = setup_window_state_path(app)
+        .ok_or_else(|| "Could not resolve home directory for window state".to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Could not resolve parent directory for window state".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn capture_setup_window_state<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<SetupWindowState>, String> {
+    let Some(window) = app.get_webview_window("setup") else {
+        return Ok(None);
+    };
+    if window.is_minimized().map_err(|e| e.to_string())? {
+        return Ok(None);
+    }
+
+    let maximized = window.is_maximized().map_err(|e| e.to_string())?;
+    let previous_state = load_setup_window_state(app);
+    let previous_normal_state = previous_state.as_ref().filter(|state| !state.maximized);
+
+    let (width, height, x, y) = if maximized {
+        // First-ever maximize may happen before we have any saved "normal" geometry.
+        // Fall back to the default size and a neutral origin instead of persisting
+        // the monitor-filling maximized dimensions as the restored window bounds.
+        previous_normal_state
+            .map(|state| (state.width, state.height, state.x, state.y))
+            .unwrap_or((DEFAULT_WINDOW_WIDTH as u32, DEFAULT_WINDOW_HEIGHT as u32, 0, 0))
+    } else {
+        let size = window.inner_size().map_err(|e| e.to_string())?;
+        let position = window.outer_position().map_err(|e| e.to_string())?;
+        (size.width, size.height, position.x, position.y)
+    };
+
+    let state = SetupWindowState {
+        width,
+        height,
+        x,
+        y,
+        maximized,
+    };
+
+    if is_valid_setup_window_state(&state) {
+        Ok(Some(state))
+    } else {
+        Ok(None)
+    }
+}
+
+fn persist_window_state_for_setup_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    if let Some(state) = capture_setup_window_state(app)? {
+        write_setup_window_state(app, &state)?;
+    }
+    Ok(())
+}
+
+fn schedule_setup_window_state_persist<R: Runtime>(app: &AppHandle<R>, delay: Duration) {
+    let ticket = WINDOW_STATE_SAVE_TICKET.fetch_add(1, Ordering::SeqCst) + 1;
+    let app_handle = app.clone();
+    thread::spawn(move || {
+        thread::sleep(delay);
+        if WINDOW_STATE_SAVE_TICKET.load(Ordering::SeqCst) != ticket {
+            return;
+        }
+        let _ = persist_window_state_for_setup_window(&app_handle);
+    });
+}
+
+fn attach_setup_window_state_listener<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+) {
+    let app_handle = app.clone();
+    window.on_window_event(move |event| match event {
+        WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+            schedule_setup_window_state_persist(
+                &app_handle,
+                Duration::from_millis(WINDOW_STATE_SAVE_DEBOUNCE_MS),
+            );
+        }
+        WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => {
+            WINDOW_STATE_SAVE_TICKET.fetch_add(1, Ordering::SeqCst);
+            let _ = persist_window_state_for_setup_window(&app_handle);
+        }
+        _ => {}
+    });
+}
 
 /// Attach the current sidecar token as `X-Sidecar-Token` to a request builder.
 /// Returns the builder unchanged when no token is stored (e.g. during restart).
@@ -617,7 +755,8 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
         Some(t) => format!("index.html?tab={}", t),
         None    => "index.html".to_string(),
     };
-    let _ = tauri::WebviewWindowBuilder::new(
+    let saved_window_state = load_setup_window_state(app);
+    let builder = tauri::WebviewWindowBuilder::new(
         app,
         "setup",
         tauri::WebviewUrl::App(url_path.into()),
@@ -625,11 +764,28 @@ fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
     .title("Auto-Scraper Agent")
     .decorations(false)
     .background_color(Color(9, 17, 28, 255))
-    .inner_size(860.0, 702.0)
     .min_inner_size(760.0, 620.0)
-    .resizable(true)
-    .center()
-    .build();
+    .resizable(true);
+
+    let builder = if let Some(saved) = &saved_window_state {
+        builder
+            .inner_size(saved.width as f64, saved.height as f64)
+            .position(saved.x as f64, saved.y as f64)
+    } else {
+        builder
+            .inner_size(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+            .center()
+    };
+
+    if let Ok(window) = builder.build() {
+        attach_setup_window_state_listener(app, &window);
+        if let Some(saved) = saved_window_state {
+            if saved.maximized {
+                let _ = window.maximize();
+                schedule_setup_window_state_persist(app, Duration::from_millis(75));
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

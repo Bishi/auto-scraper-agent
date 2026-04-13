@@ -177,6 +177,18 @@ Tagged `latest`, marked pre-release. Use for testing unreleased builds.
 
 See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the expected Realtime + heartbeat behavior and job-state contract behind these checks.
 
+### Persistence checks
+
+1. Resize and move the setup window, close it, reopen the agent, and confirm the same bounds are restored
+2. Maximize the setup window, close it, reopen the agent, and confirm it restores maximized
+3. If `~/.auto-scraper/window-state.json` is missing or contains invalid dimensions, the window falls back to the default centered size
+4. Pause the schedule from the agent UI, restart the agent, and confirm it stays paused on first launch without immediately scraping
+5. Resume the schedule from the agent UI, restart the agent, and confirm the paused state stays cleared
+6. Install an update while paused and confirm the relaunched agent still shows the schedule as paused
+7. Install an update after resizing/maximizing the window and confirm the relaunched agent restores the last saved window state
+
+### Existing lifecycle checks
+
 1. App appears in system tray
 2. Setup window opens (or skips if API key already saved)
 3. "Run Now" tray menu item triggers a scrape

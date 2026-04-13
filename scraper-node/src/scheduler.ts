@@ -9,6 +9,10 @@ const HEARTBEAT_INTERVAL_MS = 60_000;
 type Trigger = "startup" | "schedule" | "manual" | "server" | "resume";
 
 export class Scheduler {
+  constructor(
+    private readonly persistPausedState: (paused: boolean) => void = () => {},
+  ) {}
+
   private scrapeTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatAckTimer: ReturnType<typeof setTimeout> | null = null;
@@ -43,12 +47,14 @@ export class Scheduler {
   /** Epoch ms of the next scheduled scrape, or null if not yet scheduled / currently running. */
   nextRunAt: number | null = null;
 
-  start(client: AgentApiClient, version = ""): void {
+  start(client: AgentApiClient, version = "", startPaused = false): void {
     this._started = true;
     this._version = version;
-    this._paused = false;
+    this._paused = startPaused;
     this.startHeartbeat(client);
-    void this.runCycle(client, true, "startup");
+    if (!startPaused) {
+      void this.runCycle(client, true, "startup");
+    }
 
     // Start Realtime subscription non-blocking - if the server doesn't support
     // it (old deploy, missing env var) the watcher logs a warning and we fall
@@ -107,6 +113,7 @@ export class Scheduler {
       : null;
     this.nextRunAt = null;
     this._paused = true;
+    this.persistPausedState(true);
   }
 
   /**
@@ -116,6 +123,7 @@ export class Scheduler {
    */
   resume(client: AgentApiClient): void {
     this._paused = false;
+    this.persistPausedState(false);
     if (this._running) return;
 
     const MIN_DELAY_MS = 60_000; // never run sooner than 1 min after resuming

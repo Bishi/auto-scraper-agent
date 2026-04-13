@@ -54,6 +54,17 @@ describe("Scheduler - state machine", () => {
     s.pause();
     expect(s.isPaused).toBe(true);
   });
+
+  it("persists pause and resume through the injected callback", () => {
+    const persistPausedState = vi.fn();
+    const s = new Scheduler(persistPausedState);
+
+    s.pause();
+    s.resume(mockClient());
+
+    expect(persistPausedState).toHaveBeenNthCalledWith(1, true);
+    expect(persistPausedState).toHaveBeenNthCalledWith(2, false);
+  });
 });
 
 describe("Scheduler - triggerNow()", () => {
@@ -77,7 +88,31 @@ describe("Scheduler - triggerNow()", () => {
 });
 
 describe("Scheduler - heartbeat pause/resume", () => {
+  it("starts paused without running the initial scrape", async () => {
+    const client = mockClient();
+    (client.getConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ modules: {} });
+    const getSchedule = client.getSchedule as ReturnType<typeof vi.fn>;
+
+    const s = new Scheduler();
+    s.start(client as AgentApiClient, "1.0.0", true);
+
+    await vi.waitFor(() => expect(client.heartbeat).toHaveBeenCalledTimes(1));
+    expect(getSchedule).not.toHaveBeenCalled();
+    expect(s.isPaused).toBe(true);
+
+    expect(client.heartbeat).toHaveBeenCalledWith(
+      "1.0.0",
+      expect.any(String),
+      expect.objectContaining({
+        schedulerPaused: true,
+      }),
+    );
+
+    s.stop();
+  });
+
   it("applies pause when server returns pause + commandId", async () => {
+    const persistPausedState = vi.fn();
     const client = mockClient();
     (client.getSchedule as ReturnType<typeof vi.fn>).mockResolvedValue({
       intervalMs: 30 * 60 * 1000,
@@ -92,9 +127,10 @@ describe("Scheduler - heartbeat pause/resume", () => {
     });
     (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
 
-    const s = new Scheduler();
+    const s = new Scheduler(persistPausedState);
     s.start(client as AgentApiClient, "1.0.0");
     await vi.waitFor(() => expect(s.isPaused).toBe(true));
+    expect(persistPausedState).toHaveBeenCalledWith(true);
     expect(hb).toHaveBeenCalledWith(
       "1.0.0",
       expect.any(String),
@@ -237,6 +273,36 @@ describe("Scheduler - heartbeat pause/resume", () => {
         }),
       );
 
+      s.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("persists resume when the server returns a resume command", async () => {
+    vi.useFakeTimers();
+    try {
+      const persistPausedState = vi.fn();
+      const client = mockClient();
+      const hb = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          command: "resume",
+          commandId: "resume-command-id",
+        })
+        .mockResolvedValue({ ok: true });
+      (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+
+      const s = new Scheduler(persistPausedState);
+      s.pause();
+      s.start(client as AgentApiClient, "1.0.0", true);
+
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(s.isPaused).toBe(false);
+      expect(persistPausedState).toHaveBeenLastCalledWith(false);
       s.stop();
     } finally {
       vi.useRealTimers();
