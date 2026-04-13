@@ -4,6 +4,7 @@ import type { Listing } from "../../types.js";
 import { SELECTORS } from "./selectors.js";
 
 const MODULE_NAME = "avto-net";
+const HASH_EXCLUDED_KEYS = new Set(["thumbnailUrl"]);
 
 export function parseListings(html: string, sourceUrl: string): Listing[] {
   const $ = cheerio.load(html);
@@ -24,6 +25,13 @@ export function parseListings(html: string, sourceUrl: string): Listing[] {
     const sourceId = sourceIdMatch[1]!;
     const title = $el.find(SELECTORS.title).first().text().trim();
     if (!title) return;
+
+    const thumbEl = $el.find(SELECTORS.thumbnail).first();
+    const thumbnailUrl =
+      [thumbEl.attr("src"), thumbEl.attr("data-src"), thumbEl.attr("data-original")]
+        .map((src) => src?.trim())
+        .map((src) => (src ? normalizeThumbUrl(src) : null))
+        .find((url): url is string => url != null) ?? null;
 
     // Try sale price first (AKCIJSKA CENA), then regular price
     const salePriceText = $el.find(SELECTORS.priceSale).first().text().trim();
@@ -59,6 +67,7 @@ export function parseListings(html: string, sourceUrl: string): Listing[] {
       onSale: salePriceText ? 1 : 0,
       // Only include battery when present — omitting the key keeps non-EV contentHash unchanged.
       ...(tableData["baterija"] ? { battery: tableData["baterija"] } : {}),
+      ...(thumbnailUrl ? { thumbnailUrl } : {}),
     };
 
     // Normalize URL: remove relative path segments like "../"
@@ -156,11 +165,22 @@ function computeHash(
   price: number | null,
   metadata: Record<string, unknown>,
 ): string {
-  const sortedKeys = Object.keys(metadata).sort();
+  // thumbnailUrl is a presentation artifact; exclude so thumbnail rotation
+  // does not trigger spurious "changed" events.
+  const sortedKeys = Object.keys(metadata).filter((key) => !HASH_EXCLUDED_KEYS.has(key)).sort();
   const sortedMeta: Record<string, unknown> = {};
   for (const key of sortedKeys) {
     sortedMeta[key] = metadata[key];
   }
   const payload = `${title}|${price}|${JSON.stringify(sortedMeta)}`;
   return createHash("sha256").update(payload).digest("hex");
+}
+
+function normalizeThumbUrl(src: string): string | null {
+  if (!src || src.startsWith("data:")) return null;
+  if (src.startsWith("https://")) return src;
+  if (src.startsWith("http://")) return src.replace("http://", "https://");
+  if (src.startsWith("//")) return `https:${src}`;
+  if (src.startsWith("/")) return `https://www.avto.net${src}`;
+  return null;
 }

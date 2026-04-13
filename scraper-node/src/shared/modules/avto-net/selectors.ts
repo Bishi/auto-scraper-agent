@@ -1,6 +1,8 @@
 export const SELECTORS = {
   /** Container for each listing row in search results */
   listingRow: ".GO-Results-Row",
+  /** Thumbnail image - first <img> in the listing row card */
+  thumbnail: "img",
   /** Title/name div - contains a <span> with the car name */
   title: ".GO-Results-Naziv span",
   /**

@@ -43,6 +43,11 @@ describe("avto-net parser", () => {
       expect(meta["originalPrice"]).toBeNull();
     });
 
+    it("extracts metadata.thumbnailUrl from the row image src", () => {
+      const [listing] = parseListings(fixture("standard.html"), SOURCE_URL);
+      expect(listing!.metadata["thumbnailUrl"]).toBe("https://img.avto.net/thumb/12345.jpg");
+    });
+
     it("extracts second listing with correct sourceId and mileage", () => {
       const listings = parseListings(fixture("standard.html"), SOURCE_URL);
       const second = listings[1]!;
@@ -179,6 +184,93 @@ describe("avto-net parser", () => {
     it("EV and non-EV from same fixture produce different contentHashes", () => {
       const [ev, nonEv] = parseListings(fixture("ev.html"), SOURCE_URL);
       expect(ev!.contentHash).not.toBe(nonEv!.contentHash);
+    });
+  });
+
+  describe("thumbnailUrl", () => {
+    it("falls back to data-src when src is empty", () => {
+      const html = `
+        <div class="GO-Results-Row">
+          <img src="" data-src="https://img.avto.net/thumb/fallback.jpg" />
+          <div class="GO-Results-Naziv"><span>Fallback thumb</span></div>
+          <a href="../Ads/details.asp?id=11111">Poglej oglas</a>
+          <div class="GO-Results-Price-TXT-Regular">10.000 EUR</div>
+          <div class="GO-Results-Data"><table></table></div>
+        </div>`;
+      const [listing] = parseListings(html, SOURCE_URL);
+      expect(listing!.metadata["thumbnailUrl"]).toBe("https://img.avto.net/thumb/fallback.jpg");
+    });
+
+    it("falls back to data-src when src is a data URL placeholder", () => {
+      const html = `
+        <div class="GO-Results-Row">
+          <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBA==" data-src="https://img.avto.net/thumb/placeholder.jpg" />
+          <div class="GO-Results-Naziv"><span>Placeholder thumb</span></div>
+          <a href="../Ads/details.asp?id=22222">Poglej oglas</a>
+          <div class="GO-Results-Price-TXT-Regular">11.000 EUR</div>
+          <div class="GO-Results-Data"><table></table></div>
+        </div>`;
+      const [listing] = parseListings(html, SOURCE_URL);
+      expect(listing!.metadata["thumbnailUrl"]).toBe("https://img.avto.net/thumb/placeholder.jpg");
+    });
+
+    it("normalizes root-relative thumbnail paths to absolute https URLs", () => {
+      const html = `
+        <div class="GO-Results-Row">
+          <img src="/images/thumb/33333.jpg" />
+          <div class="GO-Results-Naziv"><span>Relative thumb</span></div>
+          <a href="../Ads/details.asp?id=33333">Poglej oglas</a>
+          <div class="GO-Results-Price-TXT-Regular">12.000 EUR</div>
+          <div class="GO-Results-Data"><table></table></div>
+        </div>`;
+      const [listing] = parseListings(html, SOURCE_URL);
+      expect(listing!.metadata["thumbnailUrl"]).toBe("https://www.avto.net/images/thumb/33333.jpg");
+    });
+
+    it("discards data URLs when no usable fallback exists", () => {
+      const html = `
+        <div class="GO-Results-Row">
+          <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAUEBA==" />
+          <div class="GO-Results-Naziv"><span>Inline thumb</span></div>
+          <a href="../Ads/details.asp?id=44444">Poglej oglas</a>
+          <div class="GO-Results-Price-TXT-Regular">13.000 EUR</div>
+          <div class="GO-Results-Data"><table></table></div>
+        </div>`;
+      const [listing] = parseListings(html, SOURCE_URL);
+      expect("thumbnailUrl" in listing!.metadata).toBe(false);
+    });
+
+    it("does not change contentHash when only the thumbnail URL changes", () => {
+      const baseRow = `
+        <div class="GO-Results-Row">
+          __IMG__
+          <div class="GO-Results-Naziv"><span>Hash stable thumb</span></div>
+          <a href="../Ads/details.asp?id=55555">Poglej oglas</a>
+          <div class="GO-Results-Price-TXT-Regular">14.000 EUR</div>
+          <div class="GO-Results-Data">
+            <table><tr><td class="d-none">Prevoženih</td><td>45.000 km</td></tr></table>
+          </div>
+        </div>`;
+      const htmlA = baseRow.replace("__IMG__", '<img src="https://img.avto.net/thumb/a.jpg" />');
+      const htmlB = baseRow.replace("__IMG__", '<img src="https://img.avto.net/thumb/b.jpg" />');
+
+      const [listingA] = parseListings(htmlA, SOURCE_URL);
+      const [listingB] = parseListings(htmlB, SOURCE_URL);
+      expect(listingA!.metadata["thumbnailUrl"]).toBe("https://img.avto.net/thumb/a.jpg");
+      expect(listingB!.metadata["thumbnailUrl"]).toBe("https://img.avto.net/thumb/b.jpg");
+      expect(listingA!.contentHash).toBe(listingB!.contentHash);
+    });
+
+    it("omits thumbnailUrl when a row has no image", () => {
+      const html = `
+        <div class="GO-Results-Row">
+          <div class="GO-Results-Naziv"><span>No thumb</span></div>
+          <a href="../Ads/details.asp?id=66666">Poglej oglas</a>
+          <div class="GO-Results-Price-TXT-Regular">15.000 EUR</div>
+          <div class="GO-Results-Data"><table></table></div>
+        </div>`;
+      const [listing] = parseListings(html, SOURCE_URL);
+      expect("thumbnailUrl" in listing!.metadata).toBe(false);
     });
   });
 
