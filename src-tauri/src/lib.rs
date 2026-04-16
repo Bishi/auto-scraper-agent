@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -42,6 +42,10 @@ static DOWNLOAD_PROGRESS: Mutex<Option<String>> = Mutex::new(None);
 static SIDECAR_TOKEN: Mutex<Option<String>> = Mutex::new(None);
 // Guards the one-time splash + hidden setup window startup flow.
 static INITIAL_OPEN_DONE: AtomicBool = AtomicBool::new(false);
+// Ensures the splash close/show-main handoff only schedules once per startup.
+static SPLASH_READY_SCHEDULED: AtomicBool = AtomicBool::new(false);
+// When the splash became visible, so the renderer-ready handoff can enforce a minimum display time.
+static SPLASH_SHOWN_AT: Mutex<Option<Instant>> = Mutex::new(None);
 // Monotonic ticket used to debounce window-state disk writes during drag/resize.
 static WINDOW_STATE_SAVE_TICKET: AtomicU64 = AtomicU64::new(0);
 const DEFAULT_WINDOW_WIDTH: f64 = 860.0;
@@ -49,6 +53,7 @@ const DEFAULT_WINDOW_HEIGHT: f64 = 702.0;
 const MIN_WINDOW_WIDTH: u32 = 760;
 const MIN_WINDOW_HEIGHT: u32 = 620;
 const WINDOW_STATE_SAVE_DEBOUNCE_MS: u64 = 400;
+const SPLASH_MIN_VISIBLE_MS: u64 = 2_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct SetupWindowState {
@@ -126,13 +131,34 @@ fn get_sidecar_token() -> Option<String> {
 
 #[tauri::command]
 fn app_ready(app: AppHandle) {
-    if let Some(splash) = app.get_webview_window("splash") {
-        let _ = splash.close();
+    if SPLASH_READY_SCHEDULED.swap(true, Ordering::SeqCst) {
+        return;
     }
-    if let Some(setup) = app.get_webview_window("setup") {
-        let _ = setup.show();
-        let _ = setup.set_focus();
-    }
+
+    let elapsed = SPLASH_SHOWN_AT
+        .lock()
+        .ok()
+        .and_then(|guard| *guard)
+        .map(|shown_at| shown_at.elapsed())
+        .unwrap_or_else(|| Duration::from_millis(SPLASH_MIN_VISIBLE_MS));
+    let wait = Duration::from_millis(SPLASH_MIN_VISIBLE_MS).saturating_sub(elapsed);
+
+    thread::spawn(move || {
+        if wait > Duration::ZERO {
+            thread::sleep(wait);
+        }
+
+        if let Some(splash) = app.get_webview_window("splash") {
+            let _ = splash.close();
+        }
+        if let Some(setup) = app.get_webview_window("setup") {
+            let is_visible = setup.is_visible().unwrap_or(false);
+            if !is_visible {
+                let _ = setup.show();
+                let _ = setup.set_focus();
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -856,9 +882,14 @@ fn open_splash_window<R: Runtime>(app: &AppHandle<R>) {
     .min_inner_size(400.0, 260.0)
     .max_inner_size(400.0, 260.0)
     .resizable(false)
+    .visible(false)
     .build()
     {
         let _ = window.center();
+        if let Ok(mut guard) = SPLASH_SHOWN_AT.lock() {
+            *guard = Some(Instant::now());
+        }
+        let _ = window.show();
         let _ = window.set_focus();
     }
 }
