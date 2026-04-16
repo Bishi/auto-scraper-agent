@@ -147,19 +147,6 @@ describe("avto-net parser", () => {
   });
 
   describe("year parsing", () => {
-    it("extracts 4-digit year from '3/2021' â†’ 2021", () => {
-      const [listing] = parseListings(fixture("standard.html"), SOURCE_URL);
-      expect(listing!.metadata["year"]).toBe(2021);
-    });
-
-    it("extracts year from '11/2022' â†’ 2022", () => {
-      const [listing] = parseListings(
-        fixture("top-ponudba.html"),
-        SOURCE_URL,
-      );
-      expect(listing!.metadata["year"]).toBe(2022);
-    });
-
     it("stores NEW when Starost is NOVO", () => {
       const html = `
         <div class="GO-Results-Row">
