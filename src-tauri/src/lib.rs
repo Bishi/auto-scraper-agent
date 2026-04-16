@@ -741,6 +741,22 @@ fn sidecar_server_url() -> String {
         .unwrap_or_else(|| "http://localhost:3000".to_string())
 }
 
+fn startup_setup_tab<R: Runtime>(app: &AppHandle<R>) -> Option<&'static str> {
+    let config_path = app
+        .path()
+        .home_dir()
+        .ok()
+        .map(|home| home.join(".auto-scraper").join("agent.json"))?;
+    let raw = fs::read_to_string(config_path).ok()?;
+    let parsed = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    let has_api_key = parsed
+        .get("apiKey")
+        .and_then(|value| value.as_str())
+        .map(|value| !value.is_empty())
+        .unwrap_or(false);
+    if has_api_key { Some("logs") } else { None }
+}
+
 fn open_setup_window<R: Runtime>(app: &AppHandle<R>, tab: Option<&str>) {
     if let Some(win) = app.get_webview_window("setup") {
         // Window already exists — just bring it to front.
@@ -852,7 +868,7 @@ fn ensure_initial_startup_windows<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
     open_splash_window(app);
-    create_hidden_setup_window(app, None);
+    create_hidden_setup_window(app, startup_setup_tab(app));
 }
 
 // ---------------------------------------------------------------------------

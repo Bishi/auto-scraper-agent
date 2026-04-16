@@ -196,18 +196,11 @@ async function mockFetch(url, opts = {}) {
 }
 
 let sidecarToken = "";
-let configLoadStarted = false;
 let schedulePollingStarted = false;
 
-function startConfigLoad() {
-  if (configLoadStarted) return;
-  configLoadStarted = true;
-  void loadConfig();
-}
-
 invoke("get_sidecar_token").then((t) => { if (t) sidecarToken = t; }).catch(() => {}).finally(() => {
+  void loadConfig();
   if (sidecarToken && !schedulePollingStarted) {
-    startConfigLoad();
     schedulePollingStarted = true;
     void pollSchedule();
   }
@@ -317,8 +310,9 @@ async function pollHealth() {
   }
   invoke("get_sidecar_token").then((t) => {
     if (!t) return;
+    const hadToken = sidecarToken !== "";
     sidecarToken = t;
-    startConfigLoad();
+    if (!hadToken) void loadConfig();
     if (!schedulePollingStarted) {
       schedulePollingStarted = true;
       void pollSchedule();

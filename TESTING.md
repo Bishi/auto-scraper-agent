@@ -202,5 +202,6 @@ See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the
 ### Startup splash and schedule-state checks
 
 1. On automatic startup, a splash window appears immediately and the setup window stays hidden until the first successful authenticated `/schedule` response
-2. When the setup window appears, the pause button never flashes the wrong state: it starts disabled, then enables as `Resume Schedule` if paused or `Pause Schedule` if not paused
-3. Opening the app from the tray while the splash is still visible is allowed: the setup window may show early, and the later readiness handshake should only close the splash without breaking the window
+2. Configured users still land on the Logs tab after the splash closes; unconfigured users still land on the default setup tab
+3. When the setup window appears, the pause button never flashes the wrong state: it starts disabled, then enables as `Resume Schedule` if paused or `Pause Schedule` if not paused
+4. Opening the app from the tray while the splash is still visible is allowed: the setup window may show early, and the later readiness handshake should only close the splash without breaking the window
