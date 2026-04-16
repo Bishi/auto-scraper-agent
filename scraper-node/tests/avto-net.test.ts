@@ -146,6 +146,59 @@ describe("avto-net parser", () => {
     });
   });
 
+  describe("year parsing", () => {
+    it("extracts 4-digit year from '3/2021' â†’ 2021", () => {
+      const [listing] = parseListings(fixture("standard.html"), SOURCE_URL);
+      expect(listing!.metadata["year"]).toBe(2021);
+    });
+
+    it("extracts year from '11/2022' â†’ 2022", () => {
+      const [listing] = parseListings(
+        fixture("top-ponudba.html"),
+        SOURCE_URL,
+      );
+      expect(listing!.metadata["year"]).toBe(2022);
+    });
+
+    it("stores NEW when Starost is NOVO", () => {
+      const html = `
+        <div class="GO-Results-Row">
+          <img src="https://img.avto.net/thumb/new.jpg" />
+          <div class="GO-Results-Naziv"><span>Novo vozilo</span></div>
+          <a href="../Ads/details.asp?id=99991">Poglej oglas</a>
+          <div class="GO-Results-Price-TXT-Regular">42.000 EUR</div>
+          <div class="GO-Results-Data">
+            <table>
+              <tr><td class="d-none">Starost</td><td>NOVO</td></tr>
+              <tr><td class="d-none">Gorivo</td><td>bencinski motor</td></tr>
+            </table>
+          </div>
+        </div>`;
+
+      const [listing] = parseListings(html, SOURCE_URL);
+      expect(listing!.metadata["year"]).toBe("NEW");
+    });
+
+    it("prefers Starost NOVO over 1.registracija when both are present", () => {
+      const html = `
+        <div class="GO-Results-Row">
+          <img src="https://img.avto.net/thumb/new-priority.jpg" />
+          <div class="GO-Results-Naziv"><span>Novo vozilo s prioriteto</span></div>
+          <a href="../Ads/details.asp?id=99992">Poglej oglas</a>
+          <div class="GO-Results-Price-TXT-Regular">43.000 EUR</div>
+          <div class="GO-Results-Data">
+            <table>
+              <tr><td class="d-none">Starost</td><td>NOVO</td></tr>
+              <tr><td class="d-none">1.registracija</td><td>3/2026</td></tr>
+            </table>
+          </div>
+        </div>`;
+
+      const [listing] = parseListings(html, SOURCE_URL);
+      expect(listing!.metadata["year"]).toBe("NEW");
+    });
+  });
+
   describe("EV (electric vehicle) listing", () => {
     it("stores battery for EV listing from 'Baterija' label", () => {
       const [ev] = parseListings(fixture("ev.html"), SOURCE_URL);

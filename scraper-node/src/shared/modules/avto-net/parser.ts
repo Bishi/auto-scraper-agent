@@ -58,7 +58,7 @@ export function parseListings(html: string, sourceUrl: string): Listing[] {
 
     // Known Slovenian labels: "1.registracija", "prevoženih", "gorivo", "menjalnik", "motor", "baterija"
     const metadata: Record<string, string | number | null> = {
-      year: parseYear(tableData["1.registracija"] ?? null),
+      year: parseYear(tableData["1.registracija"] ?? null, tableData["starost"] ?? null),
       mileage: parseMileageKm(tableData["prevoženih"] ?? null),
       fuel: tableData["gorivo"] ?? null,
       transmission: tableData["menjalnik"] ?? null,
@@ -97,12 +97,16 @@ export function parseListings(html: string, sourceUrl: string): Listing[] {
 }
 
 /**
- * Extract the 4-digit calendar year from avto.net's registration date string.
+ * Resolve avto.net year metadata from either "Starost" or "1.registracija".
  * e.g. "1. registracija: 3/2021" → 2021, "2021" → 2021, null/empty → null
+ * - "Starost: NOVO" -> "NEW"
+ * - "1. registracija: 3/2021" -> 2021
+ * - null/empty -> null
  */
-function parseYear(raw: string | null): number | null {
-  if (!raw) return null;
-  const match = raw.match(/(\d{4})/);
+function parseYear(registrationRaw: string | null, ageRaw: string | null): number | "NEW" | null {
+  if (ageRaw?.trim().toUpperCase() === "NOVO") return "NEW";
+  if (!registrationRaw) return null;
+  const match = registrationRaw.match(/(\d{4})/);
   if (!match) return null;
   const year = parseInt(match[1]!, 10);
   // Sanity check: must be a plausible car year
