@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Auto-Scraper Agent</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%}
+  body{
+    display:grid;
+    place-items:center;
+    background:#09111c;
+    color:#fff;
+    font-family:"Segoe UI",sans-serif;
+    overflow:hidden;
+  }
+  .shell{
+    display:grid;
+    justify-items:center;
+    gap:18px;
+    padding:24px;
+    text-align:center;
+  }
+  .title{
+    font-size:28px;
+    font-weight:600;
+    letter-spacing:.02em;
+  }
+  .spinner{
+    width:28px;
+    height:28px;
+    border-radius:50%;
+    border:3px solid rgba(255,255,255,.18);
+    border-top-color:#fff;
+    animation:spin .85s linear infinite;
+  }
+  .caption{
+    font-size:12px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:rgba(255,255,255,.6);
+  }
+  @keyframes spin{
+    to{transform:rotate(360deg)}
+  }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <div class="title">Auto-Scraper Agent</div>
+    <div class="spinner" aria-hidden="true"></div>
+    <div class="caption">Loading</div>
+  </div>
+</body>
+</html>

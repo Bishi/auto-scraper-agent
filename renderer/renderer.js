@@ -137,6 +137,8 @@ async function mockInvoke(command, args = {}) {
       return mockState.updateCheckDone;
     case "get_update_check_error":
       return mockState.updateCheckError;
+    case "app_ready":
+      return null;
     default:
       return null;
   }
@@ -194,7 +196,22 @@ async function mockFetch(url, opts = {}) {
 }
 
 let sidecarToken = "";
-invoke("get_sidecar_token").then((t) => { if (t) sidecarToken = t; }).catch(() => {}).finally(() => { loadConfig(); });
+let configLoadStarted = false;
+let schedulePollingStarted = false;
+
+function startConfigLoad() {
+  if (configLoadStarted) return;
+  configLoadStarted = true;
+  void loadConfig();
+}
+
+invoke("get_sidecar_token").then((t) => { if (t) sidecarToken = t; }).catch(() => {}).finally(() => {
+  if (sidecarToken && !schedulePollingStarted) {
+    startConfigLoad();
+    schedulePollingStarted = true;
+    void pollSchedule();
+  }
+});
 
 appApi.getVersion().then((v) => {
   document.getElementById("version-badge").textContent = "v" + v;
@@ -298,7 +315,15 @@ async function pollHealth() {
     dot.className = "status-dot offline";
     statusText.textContent = "Offline";
   }
-  invoke("get_sidecar_token").then((t) => { if (t) sidecarToken = t; }).catch(() => {});
+  invoke("get_sidecar_token").then((t) => {
+    if (!t) return;
+    sidecarToken = t;
+    startConfigLoad();
+    if (!schedulePollingStarted) {
+      schedulePollingStarted = true;
+      void pollSchedule();
+    }
+  }).catch(() => {});
 }
 
 pollHealth();
@@ -588,9 +613,11 @@ setInterval(pollScraperLogs, 3000);
 const scheduleText = document.getElementById("schedule-text");
 const pauseBtn = document.getElementById("pause-btn");
 let schedulerPaused = false;
+let appReadySent = false;
 
 function updatePauseBtn(paused) {
   schedulerPaused = paused;
+  pauseBtn.disabled = false;
   if (paused) {
     pauseBtn.innerHTML = "&#9654; Resume Schedule";
     pauseBtn.classList.add("paused");
@@ -611,6 +638,12 @@ async function pollSchedule() {
     const data = await res.json();
     updatePauseBtn(!!data.paused);
     updateRunningState(!!data.running);
+    if (!appReadySent) {
+      appReadySent = true;
+      void invoke("app_ready").catch(() => {
+        appReadySent = false;
+      });
+    }
     if (data.paused) {
       scheduleText.textContent = "paused";
       statusDivider.style.display = "";
@@ -635,8 +668,6 @@ async function pollSchedule() {
     scheduleNextSchedulePoll();
   }
 }
-
-void pollSchedule();
 
 pauseBtn.addEventListener("click", async () => {
   pauseBtn.disabled = true;

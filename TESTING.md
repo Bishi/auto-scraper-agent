@@ -198,3 +198,9 @@ See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the
 7. **Trigger scrape** / **Stop scrape** (dashboard or server `/agent` page): server keeps the command until the sidecar heartbeats **`ackCommandId`** after applying (if a scrape is already running, `scrape_now` stays queued until the scheduler can start — not lost on first heartbeat)
 8. Admin **Check for Updates** (fleet): same ack path as other commands — agent logs `Server command: check_update` and sets the update-check flag
 9. "Check for Updates" in tray shows "up to date" dialog when on latest version
+
+### Startup splash and schedule-state checks
+
+1. On automatic startup, a splash window appears immediately and the setup window stays hidden until the first successful authenticated `/schedule` response
+2. When the setup window appears, the pause button never flashes the wrong state: it starts disabled, then enables as `Resume Schedule` if paused or `Pause Schedule` if not paused
+3. Opening the app from the tray while the splash is still visible is allowed: the setup window may show early, and the later readiness handshake should only close the splash without breaking the window
