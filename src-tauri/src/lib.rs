@@ -902,6 +902,16 @@ fn ensure_initial_startup_windows<R: Runtime>(app: &AppHandle<R>) {
     create_hidden_setup_window(app, startup_setup_tab(app));
 }
 
+fn bring_app_to_front<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(splash) = app.get_webview_window("splash") {
+        let _ = splash.show();
+        let _ = splash.set_focus();
+        return;
+    }
+
+    open_setup_window(app, None);
+}
+
 // ---------------------------------------------------------------------------
 // Tray menu
 // ---------------------------------------------------------------------------
@@ -981,7 +991,16 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            bring_app_to_front(app);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![]),

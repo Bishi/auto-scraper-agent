@@ -207,3 +207,10 @@ See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the
 4. Configured users still land on the Logs tab after the splash closes; unconfigured users still land on the default setup tab
 5. When the setup window appears, the pause button never flashes the wrong state: it starts disabled, then enables as `Resume Schedule` if paused or `Pause Schedule` if not paused
 6. Opening the app from the tray while the splash is still visible is allowed: the setup window may show early, and the later readiness handshake should only close the splash without breaking the window
+
+### Single-instance checks
+
+1. Launching the app twice produces only one tray icon
+2. A second launch does not spawn a second sidecar or hit the `127.0.0.1:9001` collision path
+3. If the second launch happens while the splash is visible, the existing splash window is brought to the front
+4. If the second launch happens after startup, the existing setup window is restored/focused without changing the current tab
