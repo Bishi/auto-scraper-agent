@@ -196,8 +196,9 @@ See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the
 5. Tray tooltip shows next scrape time (updates after each completed run)
 6. Pause/Resume from the server dashboard propagates within one heartbeat (~60 s); resuming does **not** trigger an immediate scrape — the countdown is restored
 7. **Trigger scrape** / **Stop scrape** (dashboard or server `/agent` page): server keeps the command until the sidecar heartbeats **`ackCommandId`** after applying (if a scrape is already running, `scrape_now` stays queued until the scheduler can start — not lost on first heartbeat)
-8. Admin **Check for Updates** (fleet): same ack path as other commands — agent logs `Server command: check_update` and sets the update-check flag
-9. "Check for Updates" in tray shows "up to date" dialog when on latest version
+8. A module-scoped dashboard trigger runs exactly one module when the heartbeat command includes `commandPayload.module`, and the sidecar only receives one queued job for that scrape cycle
+9. Admin **Check for Updates** (fleet): same ack path as other commands — agent logs `Server command: check_update` and sets the update-check flag
+10. "Check for Updates" in tray shows "up to date" dialog when on latest version
 
 ### Startup splash and schedule-state checks
 

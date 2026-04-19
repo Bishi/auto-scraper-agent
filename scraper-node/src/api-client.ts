@@ -54,6 +54,9 @@ export interface HeartbeatResponse {
   ok: boolean;
   command?: string | null;
   commandId?: string | null;
+  commandPayload?: {
+    module: string;
+  } | null;
   /**
    * Echo of DB `paused` after the server applies `schedulerPaused`.
    * Kept only for short-term wire compatibility; the scheduler must not use this for state decisions.
@@ -104,8 +107,11 @@ export class AgentApiClient {
     return this.request<RealtimeTokenResponse>("/api/agent/realtime-token");
   }
 
-  async getSchedule(): Promise<Schedule> {
-    return this.request<Schedule>("/api/agent/schedule");
+  async getSchedule(moduleName?: string): Promise<Schedule> {
+    const query = new URLSearchParams();
+    if (moduleName) query.set("module", moduleName);
+    const suffix = query.toString();
+    return this.request<Schedule>(suffix ? `/api/agent/schedule?${suffix}` : "/api/agent/schedule");
   }
 
   async cancelJobs(jobPublicIds: string[]): Promise<void> {

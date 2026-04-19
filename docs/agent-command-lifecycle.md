@@ -17,6 +17,11 @@ Realtime is only meant to wake the agent up quickly when the server queues a new
 - `resume`
 - `check_update`
 
+For `scrape_now`, the queued command may now carry an optional payload:
+
+- no payload: scrape all enabled modules
+- `{ module: "avto-net" }`: scrape exactly that one enabled module
+
 Heartbeat is where the agent confirms:
 
 - whether the scheduler is paused
@@ -40,6 +45,7 @@ The server queues commands on `agent_sessions` using:
 
 - `pending_command`
 - `pending_command_id`
+- optional `pending_command_payload`
 
 The agent Realtime watcher subscribes to `agent_sessions`, but it should only trigger an immediate heartbeat when the command envelope changes:
 
@@ -67,6 +73,8 @@ The scheduler sets a local pending ACK after successfully applying:
 - `scrape_now`
 - `stop_scrape`
 - `check_update`
+
+ACK behavior is unchanged by command payloads. A module-scoped `scrape_now` still ACKs the same single command envelope.
 
 The next heartbeat includes that `ackCommandId`. Once the server no longer echoes the same `commandId`, the scheduler clears the local pending ACK.
 
@@ -128,6 +136,7 @@ They do not mean:
 
 Current meanings:
 
+- `scrape_now`: run all enabled modules, or exactly one module when the server includes `commandPayload.module`
 - `pause`: stop future scheduled scrapes
 - `resume`: restore the countdown for future scheduled scrapes
 - `stop_scrape`: stop the active scrape after the current module completes
@@ -149,6 +158,7 @@ The intended model is:
 ## What to watch for in testing
 
 - Run Scrape should look like `pending -> running -> completed`
+- a module-scoped Run Scrape should only start the targeted module and should only receive one scheduled job row for that scrape cycle
 - a healthy run should never flash `failed`
 - startup failure should mark the specific queued job failed
 - result-upload failure should fail the currently active job, not a random one
