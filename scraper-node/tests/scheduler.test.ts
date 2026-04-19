@@ -185,6 +185,8 @@ describe("Scheduler - heartbeat pause/resume", () => {
       s.start(client as AgentApiClient, "1.0.0", true);
 
       await vi.waitFor(() => expect(client.cancelJobs).toHaveBeenCalledWith(["job-avto"]));
+      await vi.advanceTimersByTimeAsync(600);
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(2));
       expect(runModuleMock).toHaveBeenCalledTimes(1);
       expect(runModuleMock).toHaveBeenCalledWith("bolha", expect.anything(), undefined);
       expect(client.startJob).toHaveBeenCalledTimes(1);
@@ -193,6 +195,15 @@ describe("Scheduler - heartbeat pause/resume", () => {
         expect.objectContaining({
           moduleName: "bolha",
           jobPublicId: "job-bolha",
+        }),
+      );
+      expect(hb).toHaveBeenNthCalledWith(
+        2,
+        "1.0.0",
+        expect.any(String),
+        expect.objectContaining({
+          ackCommandId: "scoped-scrape-id",
+          activeJobPublicId: null,
         }),
       );
 

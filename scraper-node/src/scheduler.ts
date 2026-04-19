@@ -340,6 +340,8 @@ export class Scheduler {
 
     if (scope?.module != null && scopedEnabled.length === 0) {
       agentLogger.warn(`[agent] Scoped scrape requested for unavailable module: ${scope.module}`);
+      // Defensive cleanup: if the server queued a scoped scrape and that module disappeared before
+      // pickup, none of the scheduled jobs from that cycle should run.
       await client.cancelJobs([...jobMap.values()]);
       return;
     }
