@@ -158,7 +158,7 @@ The intended model is:
 ## What to watch for in testing
 
 - Run Scrape should look like `pending -> running -> completed`
-- a module-scoped Run Scrape should only start the targeted module and should cancel the other scheduled jobs created for that same scrape cycle
+- a module-scoped Run Scrape should only start the targeted module and should only receive one scheduled job row for that scrape cycle
 - a healthy run should never flash `failed`
 - startup failure should mark the specific queued job failed
 - result-upload failure should fail the currently active job, not a random one

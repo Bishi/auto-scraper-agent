@@ -291,7 +291,7 @@ export class Scheduler {
 
     try {
       const [schedule, config] = await Promise.all([
-        client.getSchedule(),
+        client.getSchedule(scope?.module),
         client.getConfig(),
       ]);
 
@@ -341,7 +341,13 @@ export class Scheduler {
     if (scope?.module != null && scopedEnabled.length === 0) {
       agentLogger.warn(`[agent] Scoped scrape requested for unavailable module: ${scope.module}`);
       // Defensive cleanup: if the server queued a scoped scrape and that module disappeared before
-      // pickup, none of the scheduled jobs from that cycle should run.
+      // execution, the scoped job returned by schedule pickup must not run.
+      await client.cancelJobs([...jobMap.values()]);
+      return;
+    }
+
+    if (scope?.module != null && !jobMap.has(scope.module)) {
+      agentLogger.warn(`[agent] Scoped scrape requested for ${scope.module}, but no queued job was returned`);
       await client.cancelJobs([...jobMap.values()]);
       return;
     }
@@ -362,17 +368,6 @@ export class Scheduler {
       : undefined;
 
     const startedJobPublicIds = new Set<string>();
-
-    const skippedJobIds =
-      scope?.module != null
-        ? enabled
-            .filter(([moduleName]) => moduleName !== scope.module)
-            .map(([moduleName]) => jobMap.get(moduleName))
-            .filter((jobPublicId): jobPublicId is string => jobPublicId !== undefined)
-        : [];
-    if (skippedJobIds.length > 0) {
-      await client.cancelJobs(skippedJobIds);
-    }
 
     for (const [moduleName, moduleConfig] of scopedEnabled) {
       if (this._stopRequested) {

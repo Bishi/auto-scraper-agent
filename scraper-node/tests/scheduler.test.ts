@@ -158,7 +158,6 @@ describe("Scheduler - heartbeat pause/resume", () => {
       (client.getSchedule as ReturnType<typeof vi.fn>).mockResolvedValue({
         intervalMs: 30 * 60 * 1000,
         jobs: [
-          { publicId: "job-avto", moduleName: "avto-net", scheduledAt: new Date().toISOString() },
           { publicId: "job-bolha", moduleName: "bolha", scheduledAt: new Date().toISOString() },
         ],
       });
@@ -184,9 +183,10 @@ describe("Scheduler - heartbeat pause/resume", () => {
       const s = new Scheduler();
       s.start(client as AgentApiClient, "1.0.0", true);
 
-      await vi.waitFor(() => expect(client.cancelJobs).toHaveBeenCalledWith(["job-avto"]));
+      await vi.waitFor(() => expect(client.getSchedule).toHaveBeenCalledWith("bolha"));
       await vi.advanceTimersByTimeAsync(600);
       await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(2));
+      expect(client.cancelJobs).not.toHaveBeenCalled();
       expect(runModuleMock).toHaveBeenCalledTimes(1);
       expect(runModuleMock).toHaveBeenCalledWith("bolha", expect.anything(), undefined);
       expect(client.startJob).toHaveBeenCalledTimes(1);
@@ -476,7 +476,7 @@ describe("Scheduler - job lifecycle reporting", () => {
     expect((s as unknown as { _activeJobPublicId: string | null })._activeJobPublicId).toBeNull();
   });
 
-  it("cancels non-target jobs and only scrapes the scoped module", async () => {
+  it("scrapes only the scoped module when schedule pickup returns just that job", async () => {
     const s = new Scheduler();
     const client = mockClient();
 
@@ -509,15 +509,12 @@ describe("Scheduler - job lifecycle reporting", () => {
           bolha: { enabled: true },
         },
       },
-      new Map([
-        ["avto-net", "job-avto"],
-        ["bolha", "job-bolha"],
-      ]),
+      new Map([["bolha", "job-bolha"]]),
       "server",
       { module: "bolha" },
     );
 
-    expect(client.cancelJobs).toHaveBeenCalledWith(["job-avto"]);
+    expect(client.cancelJobs).not.toHaveBeenCalled();
     expect(runModuleMock).toHaveBeenCalledTimes(1);
     expect(runModuleMock).toHaveBeenCalledWith("bolha", expect.anything(), undefined);
     expect(client.startJob).toHaveBeenCalledTimes(1);
@@ -528,5 +525,35 @@ describe("Scheduler - job lifecycle reporting", () => {
         jobPublicId: "job-bolha",
       }),
     );
+  });
+
+  it("cancels the scoped job if schedule pickup and config disagree before execution", async () => {
+    const s = new Scheduler();
+    const client = mockClient();
+
+    await (s as unknown as {
+      scrapeAll: (
+        c: AgentApiClient,
+        config: { modules: Record<string, { enabled: boolean }> },
+        jobMap: Map<string, string>,
+        trigger: "server",
+        scope: { module: string },
+      ) => Promise<void>;
+    }).scrapeAll(
+      client,
+      {
+        modules: {
+          "avto-net": { enabled: true },
+        },
+      },
+      new Map([["bolha", "job-bolha"]]),
+      "server",
+      { module: "bolha" },
+    );
+
+    expect(client.cancelJobs).toHaveBeenCalledWith(["job-bolha"]);
+    expect(runModuleMock).not.toHaveBeenCalled();
+    expect(client.startJob).not.toHaveBeenCalled();
+    expect(client.pushResults).not.toHaveBeenCalled();
   });
 });

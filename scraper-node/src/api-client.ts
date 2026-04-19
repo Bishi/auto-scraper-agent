@@ -107,8 +107,11 @@ export class AgentApiClient {
     return this.request<RealtimeTokenResponse>("/api/agent/realtime-token");
   }
 
-  async getSchedule(): Promise<Schedule> {
-    return this.request<Schedule>("/api/agent/schedule");
+  async getSchedule(moduleName?: string): Promise<Schedule> {
+    const query = new URLSearchParams();
+    if (moduleName) query.set("module", moduleName);
+    const suffix = query.toString();
+    return this.request<Schedule>(suffix ? `/api/agent/schedule?${suffix}` : "/api/agent/schedule");
   }
 
   async cancelJobs(jobPublicIds: string[]): Promise<void> {
