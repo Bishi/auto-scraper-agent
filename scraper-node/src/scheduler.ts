@@ -7,6 +7,7 @@ import { RealtimeWatcher } from "./realtime-watcher.js";
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
 type Trigger = "startup" | "schedule" | "manual" | "server" | "resume";
+type ScrapeScope = { module: string } | null;
 
 export class Scheduler {
   constructor(
@@ -135,7 +136,11 @@ export class Scheduler {
     this.scrapeTimer = setTimeout(() => void this.runCycle(client, true, "schedule"), delay);
   }
 
-  async triggerNow(client: AgentApiClient, trigger: "manual" | "server" = "manual"): Promise<void> {
+  async triggerNow(
+    client: AgentApiClient,
+    trigger: "manual" | "server" = "manual",
+    scope: ScrapeScope = null,
+  ): Promise<void> {
     if (this._running) {
       agentLogger.info("[agent] Scrape already in progress - skipping manual trigger");
       return;
@@ -143,7 +148,7 @@ export class Scheduler {
     // Clear existing timer so the 30-min clock resets from now
     if (this.scrapeTimer) clearTimeout(this.scrapeTimer);
     this.scrapeTimer = null;
-    await this.runCycle(client, true, trigger);
+    await this.runCycle(client, true, trigger, scope);
   }
 
   private currentHeartbeatOptions(extra: {
@@ -173,13 +178,18 @@ export class Scheduler {
     client: AgentApiClient,
     command: string | null | undefined,
     commandId: string | null | undefined,
+    commandPayload: ScrapeScope = null,
   ): void {
     if (!command || !commandId || commandId === this._pendingAckCommandId) return;
 
     if (command === "scrape_now") {
       if (!this._running) {
-        agentLogger.info("[agent] Server command: scrape_now");
-        void this.triggerNow(client, "server");
+        if (commandPayload?.module) {
+          agentLogger.info(`[agent] Server command: scrape_now (${commandPayload.module})`);
+        } else {
+          agentLogger.info("[agent] Server command: scrape_now");
+        }
+        void this.triggerNow(client, "server", commandPayload);
         this.stageAck(commandId);
       }
       return;
@@ -238,7 +248,7 @@ export class Scheduler {
               this._pendingAckCommandId = null;
             }
           }
-          this.applyServerCommand(client, res.command, res.commandId);
+          this.applyServerCommand(client, res.command, res.commandId, res.commandPayload ?? null);
 
           // Keep the Realtime watcher's dedupe state in sync so it doesn't
           // fire a spurious immediate heartbeat for a command we just picked up.
@@ -267,7 +277,12 @@ export class Scheduler {
     this.heartbeatTimer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
   }
 
-  private async runCycle(client: AgentApiClient, scheduleNext = true, trigger: Trigger = "startup"): Promise<void> {
+  private async runCycle(
+    client: AgentApiClient,
+    scheduleNext = true,
+    trigger: Trigger = "startup",
+    scope: ScrapeScope = null,
+  ): Promise<void> {
     if (this._running) return;
     this._running = true;
     this._stopRequested = false;
@@ -283,7 +298,7 @@ export class Scheduler {
       intervalMs = schedule.intervalMs;
       const jobMap = new Map(schedule.jobs.map((j) => [j.moduleName, j.publicId]));
 
-      await this.scrapeAll(client, config, jobMap, trigger);
+      await this.scrapeAll(client, config, jobMap, trigger, scope);
     } catch (err) {
       const errMsg = String(err);
       agentLogger.error("[agent] Scrape cycle failed: " + errMsg);
@@ -309,12 +324,23 @@ export class Scheduler {
     config: DbConfig,
     jobMap: Map<string, string>,
     trigger: Trigger,
+    scope: ScrapeScope = null,
   ): Promise<void> {
     const modules = config.modules ?? {};
     const enabled = Object.entries(modules).filter(([, m]) => m.enabled);
+    const scopedEnabled =
+      scope?.module != null
+        ? enabled.filter(([moduleName]) => moduleName === scope.module)
+        : enabled;
 
     if (enabled.length === 0) {
       agentLogger.info("[agent] No modules enabled - nothing to scrape");
+      return;
+    }
+
+    if (scope?.module != null && scopedEnabled.length === 0) {
+      agentLogger.warn(`[agent] Scoped scrape requested for unavailable module: ${scope.module}`);
+      await client.cancelJobs([...jobMap.values()]);
       return;
     }
 
@@ -324,9 +350,10 @@ export class Scheduler {
       : trigger === "manual"   ? "manual (agent UI)"
       : trigger === "server"   ? "server command"
       : "resume";
+    const scopeLabel = scope?.module ? ` - ${scope.module} only` : "";
 
     const startedAt = new Date().toLocaleTimeString();
-    agentLogger.info(`[agent] ------------ Scrape started @ ${startedAt} [${triggerLabel}] ------------`);
+    agentLogger.info(`[agent] ------------ Scrape started @ ${startedAt} [${triggerLabel}${scopeLabel}] ------------`);
 
     const browserOptions = config.browser
       ? { headless: config.browser.headless ?? true, timeout: config.browser.timeout }
@@ -334,7 +361,18 @@ export class Scheduler {
 
     const startedJobPublicIds = new Set<string>();
 
-    for (const [moduleName, moduleConfig] of enabled) {
+    const skippedJobIds =
+      scope?.module != null
+        ? enabled
+            .filter(([moduleName]) => moduleName !== scope.module)
+            .map(([moduleName]) => jobMap.get(moduleName))
+            .filter((jobPublicId): jobPublicId is string => jobPublicId !== undefined)
+        : [];
+    if (skippedJobIds.length > 0) {
+      await client.cancelJobs(skippedJobIds);
+    }
+
+    for (const [moduleName, moduleConfig] of scopedEnabled) {
       if (this._stopRequested) {
         this._stopRequested = false;
         agentLogger.info("[agent] ------------ Scrape halted by user request ------------");

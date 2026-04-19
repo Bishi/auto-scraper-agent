@@ -54,6 +54,9 @@ export interface HeartbeatResponse {
   ok: boolean;
   command?: string | null;
   commandId?: string | null;
+  commandPayload?: {
+    module: string;
+  } | null;
   /**
    * Echo of DB `paused` after the server applies `schedulerPaused`.
    * Kept only for short-term wire compatibility; the scheduler must not use this for state decisions.

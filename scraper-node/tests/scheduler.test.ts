@@ -141,6 +141,67 @@ describe("Scheduler - heartbeat pause/resume", () => {
     s.stop();
   });
 
+  it("applies a module-scoped scrape_now server command to exactly one module", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = mockClient();
+      const hb = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          command: "scrape_now",
+          commandId: "scoped-scrape-id",
+          commandPayload: { module: "bolha" },
+        })
+        .mockResolvedValue({ ok: true });
+      (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+      (client.getSchedule as ReturnType<typeof vi.fn>).mockResolvedValue({
+        intervalMs: 30 * 60 * 1000,
+        jobs: [
+          { publicId: "job-avto", moduleName: "avto-net", scheduledAt: new Date().toISOString() },
+          { publicId: "job-bolha", moduleName: "bolha", scheduledAt: new Date().toISOString() },
+        ],
+      });
+      (client.getConfig as ReturnType<typeof vi.fn>).mockResolvedValue({
+        modules: {
+          "avto-net": { enabled: true },
+          bolha: { enabled: true },
+        },
+      });
+      runModuleMock.mockResolvedValue({
+        hadManagedChallenge: false,
+        listings: [],
+        logs: [],
+        filteredListings: [],
+        failedUrls: [],
+        debugSnapshots: [],
+      });
+      (client.pushResults as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        summary: { total: 0, new: 0, changed: 0, removed: 0 },
+      });
+
+      const s = new Scheduler();
+      s.start(client as AgentApiClient, "1.0.0", true);
+
+      await vi.waitFor(() => expect(client.cancelJobs).toHaveBeenCalledWith(["job-avto"]));
+      expect(runModuleMock).toHaveBeenCalledTimes(1);
+      expect(runModuleMock).toHaveBeenCalledWith("bolha", expect.anything(), undefined);
+      expect(client.startJob).toHaveBeenCalledTimes(1);
+      expect(client.startJob).toHaveBeenCalledWith("job-bolha", expect.any(String));
+      expect(client.pushResults).toHaveBeenCalledWith(
+        expect.objectContaining({
+          moduleName: "bolha",
+          jobPublicId: "job-bolha",
+        }),
+      );
+
+      s.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cancels the follow-up ack heartbeat when stopped", async () => {
     vi.useFakeTimers();
     try {
@@ -402,5 +463,59 @@ describe("Scheduler - job lifecycle reporting", () => {
       }),
     );
     expect((s as unknown as { _activeJobPublicId: string | null })._activeJobPublicId).toBeNull();
+  });
+
+  it("cancels non-target jobs and only scrapes the scoped module", async () => {
+    const s = new Scheduler();
+    const client = mockClient();
+
+    runModuleMock.mockResolvedValue({
+      hadManagedChallenge: false,
+      listings: [],
+      logs: [],
+      filteredListings: [],
+      failedUrls: [],
+      debugSnapshots: [],
+    });
+    (client.pushResults as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      summary: { total: 0, new: 0, changed: 0, removed: 0 },
+    });
+
+    await (s as unknown as {
+      scrapeAll: (
+        c: AgentApiClient,
+        config: { modules: Record<string, { enabled: boolean }> },
+        jobMap: Map<string, string>,
+        trigger: "server",
+        scope: { module: string },
+      ) => Promise<void>;
+    }).scrapeAll(
+      client,
+      {
+        modules: {
+          "avto-net": { enabled: true },
+          bolha: { enabled: true },
+        },
+      },
+      new Map([
+        ["avto-net", "job-avto"],
+        ["bolha", "job-bolha"],
+      ]),
+      "server",
+      { module: "bolha" },
+    );
+
+    expect(client.cancelJobs).toHaveBeenCalledWith(["job-avto"]);
+    expect(runModuleMock).toHaveBeenCalledTimes(1);
+    expect(runModuleMock).toHaveBeenCalledWith("bolha", expect.anything(), undefined);
+    expect(client.startJob).toHaveBeenCalledTimes(1);
+    expect(client.startJob).toHaveBeenCalledWith("job-bolha", expect.any(String));
+    expect(client.pushResults).toHaveBeenCalledWith(
+      expect.objectContaining({
+        moduleName: "bolha",
+        jobPublicId: "job-bolha",
+      }),
+    );
   });
 });
