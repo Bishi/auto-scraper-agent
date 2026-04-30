@@ -13,6 +13,15 @@ function applyPriceFilter(listings: Listing[], filters: NormalizedUrl["filters"]
   });
 }
 
+function applySourceAttribution(listings: Listing[], urlEntry: NormalizedUrl): void {
+  for (const listing of listings) {
+    listing.sourceUrl = urlEntry.url;
+    if (urlEntry.nickname) {
+      listing.sourceUrlNickname = urlEntry.nickname;
+    }
+  }
+}
+
 export interface ScraperModuleConfig {
   name: string;
   displayName: string;
@@ -109,9 +118,7 @@ export abstract class ScraperModule {
             // paginated page URL. Parsers receive the page URL for context but
             // the server matches listings to config URLs via sourceUrl — using
             // a page-specific URL breaks disabled/failed URL exclusion.
-            for (const listing of scraped) {
-              listing.sourceUrl = urlEntry.url;
-            }
+            applySourceAttribution(scraped, urlEntry);
             const listings = applyPriceFilter(scraped, urlEntry.filters);
             const filteredOut = scraped.length - listings.length;
 
@@ -129,11 +136,6 @@ export abstract class ScraperModule {
               { ...logId, count: listings.length, ...(filteredOut > 0 ? { filtered: filteredOut } : {}) },
               "Parsed listings from page",
             );
-            if (urlEntry.nickname) {
-              for (const listing of listings) {
-                listing.sourceUrlNickname = urlEntry.nickname;
-              }
-            }
             allListings.push(...listings);
           }
         } catch (error) {
@@ -197,9 +199,7 @@ export abstract class ScraperModule {
             // paginated page URL. Parsers receive the page URL for context but
             // the server matches listings to config URLs via sourceUrl — using
             // a page-specific URL breaks disabled/failed URL exclusion.
-            for (const listing of scraped) {
-              listing.sourceUrl = urlEntry.url;
-            }
+            applySourceAttribution(scraped, urlEntry);
             const listings = applyPriceFilter(scraped, urlEntry.filters);
             const filteredOut = scraped.length - listings.length;
 
@@ -220,12 +220,6 @@ export abstract class ScraperModule {
               { ...logId, count: listings.length, ...(filteredOut > 0 ? { filtered: filteredOut } : {}) },
               "Parsed listings from page",
             );
-            // Annotate with nickname if configured (keeps parsers pure)
-            if (urlEntry.nickname) {
-              for (const listing of listings) {
-                listing.sourceUrlNickname = urlEntry.nickname;
-              }
-            }
             allListings.push(...listings);
           }
         } catch (error) {
