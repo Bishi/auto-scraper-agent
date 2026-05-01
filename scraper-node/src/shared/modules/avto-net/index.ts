@@ -5,6 +5,7 @@ import { parseListings } from "./parser.js";
 import { SELECTORS } from "./selectors.js";
 
 const AVTO_NET_PAGE_SIZE = 48;
+const AVTO_NET_INTER_PAGE_DELAY_MS = 10_000;
 
 function normalizeAvtoNetPageUrl(href: string, baseUrl: string): string | null {
   try {
@@ -77,9 +78,18 @@ export class AvtoNetModule extends ScraperModule {
     url: string,
     options?: { referer?: string; logId?: Record<string, unknown> },
   ): Promise<void> {
+    if (this.isInterPageNavigation(options?.logId)) {
+      this.logger.info(options?.logId ?? {}, "Waiting before avto.net pagination");
+      await page.waitForTimeout(AVTO_NET_INTER_PAGE_DELAY_MS);
+    }
+
     const clicked = await this.clickPaginationLink(page, url, options?.referer, options?.logId);
     if (clicked) return;
     await super.navigateToPage(page, url, options);
+  }
+
+  private isInterPageNavigation(logId?: Record<string, unknown>): boolean {
+    return typeof logId?.["pageIndex"] === "number" && logId["pageIndex"] > 1;
   }
 
   private async clickPaginationLink(

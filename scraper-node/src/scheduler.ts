@@ -1,7 +1,7 @@
 import { describeAgentApiError, type AgentApiClient } from "./api-client.js";
 import { runModule } from "./scraper.js";
-import { agentLogger, pushScraperLogs } from "./logger.js";
-import type { DbConfig } from "./shared/types.js";
+import { agentLogger, pushScraperLog } from "./logger.js";
+import type { DbConfig, LogEntry } from "./shared/types.js";
 import { RealtimeWatcher } from "./realtime-watcher.js";
 
 const HEARTBEAT_INTERVAL_MS = 60_000;
@@ -403,7 +403,8 @@ export class Scheduler {
         }
       }
       try {
-        let result = await runModule(moduleName, moduleConfig, browserOptions);
+        const streamScraperLog = (entry: LogEntry) => pushScraperLog(moduleName, entry);
+        let result = await runModule(moduleName, moduleConfig, browserOptions, streamScraperLog);
         let wasRetried = false;
 
         // If CF issued a Managed Challenge, the profile has been cleared.
@@ -414,13 +415,10 @@ export class Scheduler {
           // Preserve snapshots from the original (failed) run so the dashboard
           // can show what Cloudflare returned, even if the retry succeeds.
           const originalSnapshots = result.debugSnapshots.map((s) => ({ ...s, preRetry: true }));
-          result = await runModule(moduleName, moduleConfig, browserOptions);
+          result = await runModule(moduleName, moduleConfig, browserOptions, streamScraperLog);
           wasRetried = true;
           result = { ...result, debugSnapshots: [...originalSnapshots, ...result.debugSnapshots] };
         }
-
-        // Push scraper module logs into the Scraper tab buffer.
-        pushScraperLogs(moduleName, result.logs);
 
         if (jobPublicId === undefined) {
           throw new Error(`Missing scheduled job public id for module ${moduleName}`);

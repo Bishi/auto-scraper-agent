@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Scheduler } from "../src/scheduler.js";
 import type { AgentApiClient, HeartbeatOptions } from "../src/api-client.js";
 import { runModule } from "../src/scraper.js";
+import { SCRAPER_LOG_BUFFER } from "../src/logger.js";
 
 vi.mock("../src/scraper.js", () => ({
   runModule: vi.fn(),
@@ -188,7 +189,7 @@ describe("Scheduler - heartbeat pause/resume", () => {
       await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(2));
       expect(client.cancelJobs).not.toHaveBeenCalled();
       expect(runModuleMock).toHaveBeenCalledTimes(1);
-      expect(runModuleMock).toHaveBeenCalledWith("bolha", expect.anything(), undefined);
+      expect(runModuleMock).toHaveBeenCalledWith("bolha", expect.anything(), undefined, expect.any(Function));
       expect(client.startJob).toHaveBeenCalledTimes(1);
       expect(client.startJob).toHaveBeenCalledWith("job-bolha", expect.any(String));
       expect(client.pushResults).toHaveBeenCalledWith(
@@ -385,6 +386,7 @@ describe("Scheduler - heartbeat pause/resume", () => {
 describe("Scheduler - job lifecycle reporting", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    SCRAPER_LOG_BUFFER.length = 0;
   });
 
   it("reports startup failure against the specific job public id", async () => {
@@ -476,6 +478,54 @@ describe("Scheduler - job lifecycle reporting", () => {
     expect((s as unknown as { _activeJobPublicId: string | null })._activeJobPublicId).toBeNull();
   });
 
+  it("streams scraper logs before result upload finishes", async () => {
+    const s = new Scheduler();
+    const client = mockClient();
+    const jobPublicId = "dddddddddddd";
+
+    runModuleMock.mockImplementation(async (_moduleName, _moduleConfig, _browserOptions, onLog) => {
+      onLog?.({
+        level: 30,
+        time: Date.UTC(2026, 4, 1, 9, 35, 58),
+        msg: "Scraping page",
+        nickname: "Clio",
+        pageIndex: 2,
+        pageCount: 2,
+        pageUrl: "https://www.avto.net/Ads/results.asp?model=Clio&stran=2",
+      });
+      expect(SCRAPER_LOG_BUFFER[0]?.msg).toBe("[bolha] Scraping page (Clio) page=2/2");
+      return {
+        hadManagedChallenge: false,
+        listings: [],
+        logs: [],
+        filteredListings: [],
+        failedUrls: [],
+        debugSnapshots: [],
+      };
+    });
+    (client.pushResults as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      summary: { total: 0, new: 0, changed: 0, removed: 0 },
+    });
+
+    await (s as unknown as {
+      scrapeAll: (
+        c: AgentApiClient,
+        config: { modules: Record<string, { enabled: boolean }> },
+        jobMap: Map<string, string>,
+        trigger: "manual",
+      ) => Promise<void>;
+    }).scrapeAll(
+      client,
+      { modules: { bolha: { enabled: true } } },
+      new Map([["bolha", jobPublicId]]),
+      "manual",
+    );
+
+    expect(client.pushResults).toHaveBeenCalled();
+    expect(SCRAPER_LOG_BUFFER).toHaveLength(1);
+  });
+
   it("scrapes only the scoped module when schedule pickup returns just that job", async () => {
     const s = new Scheduler();
     const client = mockClient();
@@ -516,7 +566,7 @@ describe("Scheduler - job lifecycle reporting", () => {
 
     expect(client.cancelJobs).not.toHaveBeenCalled();
     expect(runModuleMock).toHaveBeenCalledTimes(1);
-    expect(runModuleMock).toHaveBeenCalledWith("bolha", expect.anything(), undefined);
+    expect(runModuleMock).toHaveBeenCalledWith("bolha", expect.anything(), undefined, expect.any(Function));
     expect(client.startJob).toHaveBeenCalledTimes(1);
     expect(client.startJob).toHaveBeenCalledWith("job-bolha", expect.any(String));
     expect(client.pushResults).toHaveBeenCalledWith(

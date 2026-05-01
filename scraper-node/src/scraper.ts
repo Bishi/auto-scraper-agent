@@ -2,7 +2,7 @@ import pino from "pino";
 import type { Logger } from "pino";
 import { Writable } from "node:stream";
 import { rmSync } from "node:fs";
-import { agentLogger } from "./logger.js";
+import { agentLogger, sanitizeScraperLogEntry } from "./logger.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { BrowserManager } from "./shared/browser/context.js";
@@ -18,7 +18,7 @@ interface LogBuffer {
   flush(): LogEntry[];
 }
 
-function createLogBuffer(): LogBuffer {
+function createLogBuffer(onLog?: (entry: LogEntry) => void): LogBuffer {
   const entries: LogEntry[] = [];
 
   const stream = new Writable({
@@ -27,7 +27,11 @@ function createLogBuffer(): LogBuffer {
         const line = chunk.toString().trim();
         if (line) {
           const entry = JSON.parse(line) as LogEntry;
-          if (entry.msg) entries.push(entry);
+          if (entry.msg) {
+            const sanitized = sanitizeScraperLogEntry(entry);
+            entries.push(sanitized);
+            onLog?.(sanitized);
+          }
         }
       } catch {
         // non-JSON line — ignore
@@ -63,8 +67,9 @@ export async function runModule(
   moduleName: string,
   moduleConfig: DbModuleConfig,
   browserOptions?: { headless?: boolean; slowMo?: number; timeout?: number },
+  onLog?: (entry: LogEntry) => void,
 ): Promise<ScrapeResult> {
-  const { logger, flush } = createLogBuffer();
+  const { logger, flush } = createLogBuffer(onLog);
 
   const normalizedUrls = (moduleConfig.urls ?? []).map((u) =>
     normalizeUrlEntry(u as UrlEntry),

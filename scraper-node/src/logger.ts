@@ -77,18 +77,23 @@ const agentStream = new Writable({
 export const agentLogger: Logger = pino({ level: "info", base: null }, agentStream) as unknown as Logger;
 
 // ---------------------------------------------------------------------------
-// Scraper log buffer — in-memory only, populated by pushScraperLogs() after
-// each runModule() call. Not persisted — shows logs from the current session.
+// Scraper log buffer — in-memory only, populated as scraper modules emit logs.
+// Not persisted — shows logs from the current session.
 // ---------------------------------------------------------------------------
 
 export const SCRAPER_LOG_BUFFER: UiLogEntry[] = [];
+
+export function sanitizeScraperLogEntry(raw: LogEntry): LogEntry {
+  const sanitized: LogEntry = { ...raw };
+  delete sanitized["url"];
+  delete sanitized["pageUrl"];
+  return sanitized;
+}
 
 function formatScraperMsg(moduleName: string, raw: LogEntry): string {
   const parts: string[] = [`[${moduleName}]`, raw.msg];
   if (typeof raw["nickname"] === "string") {
     parts.push(`(${raw["nickname"]})`);
-  } else if (typeof raw["url"] === "string") {
-    parts.push(`(${raw["url"]})`);
   }
   if (typeof raw["pageIndex"] === "number" && typeof raw["pageCount"] === "number") {
     parts.push(`page=${raw["pageIndex"]}/${raw["pageCount"]}`);
@@ -96,7 +101,6 @@ function formatScraperMsg(moduleName: string, raw: LogEntry): string {
   if (typeof raw["discoveredPages"] === "number") parts.push(`pages=${raw["discoveredPages"]}`);
   if (typeof raw["totalPages"] === "number") parts.push(`totalPages=${raw["totalPages"]}`);
   if (typeof raw["maxPages"] === "number") parts.push(`maxPages=${raw["maxPages"]}`);
-  if (typeof raw["pageUrl"] === "string") parts.push(`pageUrl=${raw["pageUrl"]}`);
   if (typeof raw["count"]    === "number") parts.push(`count=${raw["count"]}`);
   if (typeof raw["filtered"] === "number") parts.push(`filtered=${raw["filtered"]}`);
   const errObj = raw["err"];
@@ -106,15 +110,19 @@ function formatScraperMsg(moduleName: string, raw: LogEntry): string {
   return parts.join(" ");
 }
 
+export function pushScraperLog(moduleName: string, raw: LogEntry): void {
+  if (!raw.msg) return;
+  const entry: UiLogEntry = {
+    ts:    new Date(raw.time).toISOString(),
+    level: pinoLevel(raw.level),
+    msg:   formatScraperMsg(moduleName, sanitizeScraperLogEntry(raw)),
+  };
+  SCRAPER_LOG_BUFFER.push(entry);
+  if (SCRAPER_LOG_BUFFER.length > MAX_SCRAPER_LINES) SCRAPER_LOG_BUFFER.shift();
+}
+
 export function pushScraperLogs(moduleName: string, entries: LogEntry[]): void {
   for (const raw of entries) {
-    if (!raw.msg) continue;
-    const entry: UiLogEntry = {
-      ts:    new Date(raw.time).toISOString(),
-      level: pinoLevel(raw.level),
-      msg:   formatScraperMsg(moduleName, raw),
-    };
-    SCRAPER_LOG_BUFFER.push(entry);
-    if (SCRAPER_LOG_BUFFER.length > MAX_SCRAPER_LINES) SCRAPER_LOG_BUFFER.shift();
+    pushScraperLog(moduleName, raw);
   }
 }

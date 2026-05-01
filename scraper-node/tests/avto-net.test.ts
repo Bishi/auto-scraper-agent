@@ -105,6 +105,7 @@ describe("avto-net parser", () => {
 
       await module.run(testPage);
 
+      expect(testPage.waitForTimeout).toHaveBeenCalledWith(10_000);
       expect(click).toHaveBeenCalledWith(expect.objectContaining({ delay: expect.any(Number) }));
       expect(testPage.waitForNavigation).toHaveBeenCalledWith({
         waitUntil: "domcontentloaded",

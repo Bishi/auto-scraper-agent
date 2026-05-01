@@ -455,6 +455,7 @@ logBox.addEventListener("scroll", () => {
   autoScroll = atBottom;
 });
 attachLogCopyNormalizer(logBox);
+attachScopedLogSelectAll(logBox);
 
 function esc(str) {
   return str
@@ -539,6 +540,30 @@ function attachLogCopyNormalizer(box) {
   });
 }
 
+function selectLogBoxEntries(box) {
+  const entries = box.querySelectorAll(".log-entry");
+  if (entries.length === 0) return;
+
+  const range = document.createRange();
+  range.setStartBefore(entries[0]);
+  range.setEndAfter(entries[entries.length - 1]);
+
+  const selection = window.getSelection();
+  if (!selection) return;
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function attachScopedLogSelectAll(box) {
+  box.tabIndex = 0;
+  box.addEventListener("mousedown", () => box.focus());
+  box.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "a") return;
+    event.preventDefault();
+    selectLogBoxEntries(box);
+  });
+}
+
 function renderLogs() {
   renderLogList(
     logBox,
@@ -578,12 +603,13 @@ scraperLogBox.addEventListener("scroll", () => {
   scraperAutoScroll = atBottom;
 });
 attachLogCopyNormalizer(scraperLogBox);
+attachScopedLogSelectAll(scraperLogBox);
 
 function renderScraperLogs() {
   renderLogList(
     scraperLogBox,
     scraperLogs,
-    "No scraper logs yet. Logs appear here after a scrape runs.",
+    "No scraper logs yet. Logs appear here while a scrape runs.",
     () => scraperLastKey,
     (value) => { scraperLastKey = value; },
     () => scraperAutoScroll,
@@ -602,7 +628,7 @@ async function pollScraperLogs() {
 }
 
 pollScraperLogs();
-setInterval(pollScraperLogs, 3000);
+setInterval(pollScraperLogs, 1000);
 
 const scheduleText = document.getElementById("schedule-text");
 const pauseBtn = document.getElementById("pause-btn");
