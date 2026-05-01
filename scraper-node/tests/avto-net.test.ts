@@ -115,6 +115,60 @@ describe("avto-net parser", () => {
         expect.objectContaining({ referer: SOURCE_URL }),
       );
     });
+
+    it("warns when a pagination click does not confirm navigation", async () => {
+      class ClickPaginationModule extends AvtoNetModule {
+        async discoverPages(_page: Page, url: string, maxPages: number): Promise<string[]> {
+          return [url, `${url}&stran=2`].slice(0, maxPages);
+        }
+
+        async scrape(_page: Page, url: string): Promise<Listing[]> {
+          return [listing(url.includes("stran=2") ? "page-2" : "page-1")];
+        }
+      }
+
+      const pageTwoUrl = `${SOURCE_URL}&stran=2`;
+      const navigationError = new Error("navigation timeout");
+      const logger = testLogger();
+      const warn = vi.mocked(logger.warn);
+      const link = {
+        getAttribute: vi.fn().mockResolvedValue(pageTwoUrl),
+        click: vi.fn().mockResolvedValue(undefined),
+      };
+      const testPage = {
+        goto: vi.fn().mockResolvedValue(undefined),
+        waitForTimeout: vi.fn().mockResolvedValue(undefined),
+        waitForNavigation: vi.fn().mockRejectedValue(navigationError),
+        content: vi.fn().mockResolvedValue(""),
+        $$: vi.fn().mockResolvedValue([link]),
+        close: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Page;
+
+      const module = new ClickPaginationModule({
+        name: "avto-net",
+        displayName: "Avto.net",
+        urls: [{
+          url: SOURCE_URL,
+          enabled: true,
+          nickname: "BMW",
+          pagination: true,
+          maxPages: 2,
+        }],
+      }, logger);
+
+      await module.run(testPage);
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          nickname: "BMW",
+          pageIndex: 2,
+          pageCount: 2,
+          pageUrl: pageTwoUrl,
+          err: navigationError,
+        }),
+        "Pagination click did not confirm navigation",
+      );
+    });
   });
 
   describe("standard listing layout", () => {

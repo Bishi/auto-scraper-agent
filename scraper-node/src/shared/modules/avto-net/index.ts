@@ -100,10 +100,23 @@ export class AvtoNetModule extends ScraperModule {
       if (linkUrl !== targetUrl) continue;
 
       this.logger.info({ ...logId, pageUrl: targetUrl }, "Clicking pagination link");
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => null),
+      const [navigationError] = await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }).then(
+          () => null,
+          (err: unknown) => err,
+        ),
         link.click({ delay: 50 + Math.random() * 100 }),
       ]);
+      if (navigationError) {
+        this.logger.warn(
+          {
+            ...logId,
+            pageUrl: targetUrl,
+            err: navigationError,
+          },
+          "Pagination click did not confirm navigation",
+        );
+      }
       return true;
     }
 
