@@ -169,6 +169,34 @@ describe("ScraperModule source attribution", () => {
     );
   });
 
+  it("uses the previous page as referer for direct pagination navigation", async () => {
+    class PaginatedTestModule extends TestModule {
+      async discoverPages(_page: Page, url: string, maxPages: number): Promise<string[]> {
+        return [url, `${url}?stran=2`].slice(0, maxPages);
+      }
+    }
+
+    const testPage = page();
+    const module = new PaginatedTestModule({
+      name: "test-module",
+      displayName: "Test Module",
+      urls: [{
+        url: "https://example.com/search",
+        enabled: true,
+        nickname: "Dealer A",
+        pagination: true,
+        maxPages: 2,
+      }],
+    }, logger());
+
+    await module.run(testPage);
+
+    expect(testPage.goto).toHaveBeenCalledWith(
+      "https://example.com/search?stran=2",
+      { waitUntil: "domcontentloaded", referer: "https://example.com/search" },
+    );
+  });
+
   it("logs the page that failed during paginated scraping", async () => {
     class FailingPaginatedTestModule extends TestModule {
       async discoverPages(_page: Page, url: string, maxPages: number): Promise<string[]> {

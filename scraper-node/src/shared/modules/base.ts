@@ -77,6 +77,17 @@ export abstract class ScraperModule {
     return [url];
   }
 
+  protected async navigateToPage(
+    page: Page,
+    url: string,
+    options?: { referer?: string; logId?: Record<string, unknown> },
+  ): Promise<void> {
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      ...(options?.referer ? { referer: options.referer } : {}),
+    });
+  }
+
   async run(page: Page, createPage?: () => Promise<Page>): Promise<Listing[]> {
     this.lastFailedUrls = [];
     this.lastFilteredSourceIds = new Set();
@@ -115,6 +126,7 @@ export abstract class ScraperModule {
           currentPageCount = pages.length;
           for (let pageOffset = 0; pageOffset < pages.length; pageOffset++) {
             const pageUrl = pages[pageOffset]!;
+            const previousPageUrl = currentPageUrl;
             currentPageUrl = pageUrl;
             currentPageIndex = pageOffset + 1;
             const pageLogId = {
@@ -127,7 +139,7 @@ export abstract class ScraperModule {
             this.logger.info(pageLogId, "Scraping page");
 
             if (pageUrl !== urlEntry.url || !urlEntry.pagination) {
-              await p.goto(pageUrl, { waitUntil: "domcontentloaded" });
+              await this.navigateToPage(p, pageUrl, { referer: previousPageUrl, logId: pageLogId });
             }
 
             const delay = 1000 + Math.random() * 2000;
@@ -225,6 +237,7 @@ export abstract class ScraperModule {
           currentPageCount = pages.length;
           for (let pageOffset = 0; pageOffset < pages.length; pageOffset++) {
             const pageUrl = pages[pageOffset]!;
+            const previousPageUrl = currentPageUrl;
             currentPageUrl = pageUrl;
             currentPageIndex = pageOffset + 1;
             const pageLogId = {
@@ -237,7 +250,7 @@ export abstract class ScraperModule {
             this.logger.info(pageLogId, "Scraping page");
 
             if (pageUrl !== urlEntry.url || !urlEntry.pagination) {
-              await page.goto(pageUrl, { waitUntil: "domcontentloaded" });
+              await this.navigateToPage(page, pageUrl, { referer: previousPageUrl, logId: pageLogId });
             }
 
             const delay = 1000 + Math.random() * 2000;

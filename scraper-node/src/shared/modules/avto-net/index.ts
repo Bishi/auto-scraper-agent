@@ -72,6 +72,44 @@ export class AvtoNetModule extends ScraperModule {
     super({ ...config, name: "avto-net", displayName: "Avto.net" }, logger);
   }
 
+  protected override async navigateToPage(
+    page: Page,
+    url: string,
+    options?: { referer?: string; logId?: Record<string, unknown> },
+  ): Promise<void> {
+    const clicked = await this.clickPaginationLink(page, url, options?.referer, options?.logId);
+    if (clicked) return;
+    await super.navigateToPage(page, url, options);
+  }
+
+  private async clickPaginationLink(
+    page: Page,
+    url: string,
+    referer?: string,
+    logId?: Record<string, unknown>,
+  ): Promise<boolean> {
+    const targetUrl = normalizeAvtoNetPageUrl(url, referer ?? url);
+    if (!targetUrl) return false;
+
+    const links = await page.$$(SELECTORS.pageLinks).catch(() => []);
+    for (const link of links) {
+      const href = await link.getAttribute("href").catch(() => null);
+      if (!href) continue;
+
+      const linkUrl = normalizeAvtoNetPageUrl(href, referer ?? url);
+      if (linkUrl !== targetUrl) continue;
+
+      this.logger.info({ ...logId, pageUrl: targetUrl }, "Clicking pagination link");
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => null),
+        link.click({ delay: 50 + Math.random() * 100 }),
+      ]);
+      return true;
+    }
+
+    return false;
+  }
+
   async scrape(page: Page, url: string): Promise<Listing[]> {
     // Cloudflare challenge titles, keyed to the locale set in context.ts (sl-SI).
     // The Slovenian title "Počakajte trenutek..." is the localised equivalent of

@@ -1,9 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Logger } from "pino";
+import type { Page } from "playwright";
+import type { Listing } from "../src/shared/types.js";
 import { parseListings } from "../src/shared/modules/avto-net/parser.js";
 import {
+  AvtoNetModule,
   buildSequentialStranPageUrls,
   buildStranPageUrl,
   extractAvtoNetResultCount,
@@ -15,6 +19,29 @@ const fixture = (name: string) =>
 
 const SOURCE_URL =
   "https://www.avto.net/Ads/results.asp?znamka=bmw&tip=320d&cType=1";
+
+function testLogger(): Logger {
+  return {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+  } as unknown as Logger;
+}
+
+function listing(sourceId: string): Listing {
+  return {
+    sourceId,
+    moduleName: "avto-net",
+    sourceUrl: SOURCE_URL,
+    listingUrl: `https://www.avto.net/Ads/details.asp?id=${sourceId}`,
+    title: `Listing ${sourceId}`,
+    price: 1000,
+    metadata: {},
+    contentHash: `hash-${sourceId}`,
+    firstSeenAt: "2026-05-01T09:00:00.000Z",
+    lastSeenAt: "2026-05-01T09:00:00.000Z",
+  };
+}
 
 describe("avto-net parser", () => {
   describe("pagination helpers", () => {
@@ -36,6 +63,57 @@ describe("avto-net parser", () => {
         `${SOURCE_URL}&stran=4`,
         `${SOURCE_URL}&stran=5`,
       ]);
+    });
+
+    it("clicks an avto.net pagination link instead of directly navigating when the link is present", async () => {
+      class ClickPaginationModule extends AvtoNetModule {
+        async discoverPages(_page: Page, url: string, maxPages: number): Promise<string[]> {
+          return [url, `${url}&stran=2`].slice(0, maxPages);
+        }
+
+        async scrape(_page: Page, url: string): Promise<Listing[]> {
+          return [listing(url.includes("stran=2") ? "page-2" : "page-1")];
+        }
+      }
+
+      const pageTwoUrl = `${SOURCE_URL}&stran=2`;
+      const click = vi.fn().mockResolvedValue(undefined);
+      const link = {
+        getAttribute: vi.fn().mockResolvedValue(pageTwoUrl),
+        click,
+      };
+      const testPage = {
+        goto: vi.fn().mockResolvedValue(undefined),
+        waitForTimeout: vi.fn().mockResolvedValue(undefined),
+        waitForNavigation: vi.fn().mockResolvedValue(null),
+        content: vi.fn().mockResolvedValue(""),
+        $$: vi.fn().mockResolvedValue([link]),
+        close: vi.fn().mockResolvedValue(undefined),
+      } as unknown as Page;
+
+      const module = new ClickPaginationModule({
+        name: "avto-net",
+        displayName: "Avto.net",
+        urls: [{
+          url: SOURCE_URL,
+          enabled: true,
+          nickname: "BMW",
+          pagination: true,
+          maxPages: 2,
+        }],
+      }, testLogger());
+
+      await module.run(testPage);
+
+      expect(click).toHaveBeenCalledWith(expect.objectContaining({ delay: expect.any(Number) }));
+      expect(testPage.waitForNavigation).toHaveBeenCalledWith({
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      });
+      expect(testPage.goto).not.toHaveBeenCalledWith(
+        pageTwoUrl,
+        expect.objectContaining({ referer: SOURCE_URL }),
+      );
     });
   });
 
