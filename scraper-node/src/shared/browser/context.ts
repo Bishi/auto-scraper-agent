@@ -31,11 +31,12 @@ import EvasionSourceurl             from "puppeteer-extra-plugin-stealth/evasion
 import EvasionWebglVendor           from "puppeteer-extra-plugin-stealth/evasions/webgl.vendor/index.js";
 import EvasionWindowOuterdimensions from "puppeteer-extra-plugin-stealth/evasions/window.outerdimensions/index.js";
 import playwright from "playwright";
-import type { BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { AppConfig } from "../config.js";
+import { agentLogger } from "../../logger.js";
 
 // ---------------------------------------------------------------------------
 // Build the stealth-patched chromium once at module load.
@@ -84,10 +85,22 @@ for (const [path, mod] of EVASION_DEPS) {
 const USER_DATA_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 export type BrowserConfig = AppConfig["browser"] & {
-  /** Path to a Chromium executable. When running as a bundled .exe, set to the
-   *  chromium-headless-shell sidecar path via the CHROMIUM_PATH env var. */
+  /** Optional Chromium executable override from CHROMIUM_PATH.
+   *  Bundled builds currently use Playwright's default browser discovery unless this is set. */
   executablePath?: string;
 };
+
+function configuredBrowserRuntime(config: BrowserConfig): string {
+  return config.executablePath ? `CHROMIUM_PATH:${config.executablePath}` : "default";
+}
+
+function browserVersion(browser: Pick<Browser, "version"> | null): string {
+  try {
+    return browser?.version() ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 export class BrowserManager {
   private context: BrowserContext | null = null;
@@ -111,9 +124,13 @@ export class BrowserManager {
     // Playwright's Browser type doesn't expose process() in its public typings,
     // but the underlying object does have it at runtime for locally-launched browsers.
     const browser = this.context.browser() as
-      | (ReturnType<BrowserContext["browser"]> & { process?(): { pid?: number } })
+      | (Browser & { process?(): { pid?: number } })
       | null;
     this.browserPid = browser?.process?.()?.pid ?? null;
+    agentLogger.info(
+      `[agent] Browser launch headless=${this.config.headless} ` +
+      `configured=${configuredBrowserRuntime(this.config)} version=${browserVersion(browser)}`,
+    );
     this.context.setDefaultTimeout(this.config.timeout);
 
     // Inject fingerprint fixes directly on the context so they apply to every
