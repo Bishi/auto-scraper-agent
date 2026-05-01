@@ -54,6 +54,8 @@ const MIN_WINDOW_WIDTH: u32 = 760;
 const MIN_WINDOW_HEIGHT: u32 = 620;
 const WINDOW_STATE_SAVE_DEBOUNCE_MS: u64 = 400;
 const SPLASH_MIN_VISIBLE_MS: u64 = 2_000;
+const UPDATE_PROGRESS_LOG_STEP_PERCENT: u64 = 10;
+const UPDATE_PROGRESS_BAR_WIDTH: u64 = 10;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct SetupWindowState {
@@ -425,6 +427,17 @@ fn sidecar_log_quick(level: &str, msg: &str) {
     }
 }
 
+fn format_update_progress_bar(percent: u64) -> String {
+    let clamped = percent.min(100);
+    let filled = (clamped * UPDATE_PROGRESS_BAR_WIDTH / 100).min(UPDATE_PROGRESS_BAR_WIDTH);
+    let empty = UPDATE_PROGRESS_BAR_WIDTH.saturating_sub(filled);
+    format!(
+        "[{}{}]",
+        "#".repeat(filled as usize),
+        "-".repeat(empty as usize),
+    )
+}
+
 /// Check GitHub releases API for a newer version.
 /// Returns Ok(Some(tag)) if an update is available, Ok(None) if already on latest,
 /// or Err(description) if the API call failed (network error, auth, 404, etc.).
@@ -586,9 +599,14 @@ fn download_installer(tag: &str, app: &AppHandle) -> Result<PathBuf, String> {
     eprintln!("[agent] Downloading installer from {url}");
     set_tray_tooltip(app, "Auto-Scraper — Starting download…");
     if let Ok(mut g) = DOWNLOAD_PROGRESS.lock() { *g = Some("Starting download…".into()); }
+    let log_client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .ok();
 
     let mut file = File::create(&dest).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
+    let mut last_logged_percent: u64 = 0;
     let mut buf = vec![0u8; 65_536]; // 64 KB chunks
 
     loop {
@@ -597,18 +615,44 @@ fn download_installer(tag: &str, app: &AppHandle) -> Result<PathBuf, String> {
         file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
         downloaded += n as u64;
 
+        let percent = if total_bytes > 0 {
+            (downloaded * 100 / total_bytes).min(100)
+        } else {
+            0
+        };
         let progress = if total_bytes > 0 {
             format!(
                 "{} / {} MB ({}%)",
                 downloaded  / 1_048_576,
                 total_bytes / 1_048_576,
-                downloaded * 100 / total_bytes,
+                percent,
             )
         } else {
             format!("{} MB", downloaded / 1_048_576)
         };
         set_tray_tooltip(app, &format!("Auto-Scraper — Downloading update: {progress}"));
         if let Ok(mut g) = DOWNLOAD_PROGRESS.lock() { *g = Some(progress); }
+
+        if total_bytes > 0 {
+            let milestone_percent =
+                (percent / UPDATE_PROGRESS_LOG_STEP_PERCENT) * UPDATE_PROGRESS_LOG_STEP_PERCENT;
+            if milestone_percent > last_logged_percent {
+                last_logged_percent = milestone_percent;
+                if let Some(client) = &log_client {
+                    sidecar_log(
+                        client,
+                        "info",
+                        &format!(
+                            "[agent] Downloading update v{version} {} {}% ({} / {} MB)",
+                            format_update_progress_bar(milestone_percent),
+                            milestone_percent,
+                            downloaded / 1_048_576,
+                            total_bytes / 1_048_576,
+                        ),
+                    );
+                }
+            }
+        }
     }
 
     if let Ok(mut g) = DOWNLOAD_PROGRESS.lock() { *g = None; }
