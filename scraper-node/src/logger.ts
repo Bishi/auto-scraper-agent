@@ -88,8 +88,15 @@ function formatScraperMsg(moduleName: string, raw: LogEntry): string {
   if (typeof raw["nickname"] === "string") {
     parts.push(`(${raw["nickname"]})`);
   } else if (typeof raw["url"] === "string") {
-    parts.push(`(${(raw["url"] as string).slice(0, 80)})`);
+    parts.push(`(${raw["url"]})`);
   }
+  if (typeof raw["pageIndex"] === "number" && typeof raw["pageCount"] === "number") {
+    parts.push(`page=${raw["pageIndex"]}/${raw["pageCount"]}`);
+  }
+  if (typeof raw["discoveredPages"] === "number") parts.push(`pages=${raw["discoveredPages"]}`);
+  if (typeof raw["totalPages"] === "number") parts.push(`totalPages=${raw["totalPages"]}`);
+  if (typeof raw["maxPages"] === "number") parts.push(`maxPages=${raw["maxPages"]}`);
+  if (typeof raw["pageUrl"] === "string") parts.push(`pageUrl=${raw["pageUrl"]}`);
   if (typeof raw["count"]    === "number") parts.push(`count=${raw["count"]}`);
   if (typeof raw["filtered"] === "number") parts.push(`filtered=${raw["filtered"]}`);
   const errObj = raw["err"];

@@ -96,20 +96,36 @@ export abstract class ScraperModule {
         this.logger.info(logId, "Scraping (parallel)");
 
         const p = await createPage!();
+        let currentPageUrl = urlEntry.url;
+        let currentPageIndex = 1;
+        let currentPageCount = 1;
         try {
           let pages: string[];
           if (urlEntry.pagination) {
             await p.goto(urlEntry.url, { waitUntil: "domcontentloaded" });
             pages = await this.discoverPages(p, urlEntry.url, urlEntry.maxPages);
             this.logger.info(
-              { ...logId, totalPages: pages.length, maxPages: urlEntry.maxPages },
+              { ...logId, discoveredPages: pages.length, maxPages: urlEntry.maxPages },
               "Discovered pages",
             );
           } else {
             pages = [urlEntry.url];
           }
 
-          for (const pageUrl of pages) {
+          currentPageCount = pages.length;
+          for (let pageOffset = 0; pageOffset < pages.length; pageOffset++) {
+            const pageUrl = pages[pageOffset]!;
+            currentPageUrl = pageUrl;
+            currentPageIndex = pageOffset + 1;
+            const pageLogId = {
+              ...logId,
+              pageIndex: currentPageIndex,
+              pageCount: currentPageCount,
+              pageUrl,
+            };
+
+            this.logger.info(pageLogId, "Scraping page");
+
             if (pageUrl !== urlEntry.url || !urlEntry.pagination) {
               await p.goto(pageUrl, { waitUntil: "domcontentloaded" });
             }
@@ -137,13 +153,22 @@ export abstract class ScraperModule {
             }
 
             this.logger.info(
-              { ...logId, count: listings.length, ...(filteredOut > 0 ? { filtered: filteredOut } : {}) },
+              { ...pageLogId, count: listings.length, ...(filteredOut > 0 ? { filtered: filteredOut } : {}) },
               "Parsed listings from page",
             );
             allListings.push(...listings);
           }
         } catch (error) {
-          this.logger.error({ ...logId, err: error }, "Failed to scrape URL");
+          this.logger.error(
+            {
+              ...logId,
+              pageIndex: currentPageIndex,
+              pageCount: currentPageCount,
+              pageUrl: currentPageUrl,
+              err: error,
+            },
+            "Failed to scrape URL",
+          );
           this.lastFailedUrls.push(urlEntry.url);
           // Capture a fallback snapshot when the module-level code didn't already
           // record one (e.g. unexpected Playwright timeout / navigation error).
@@ -181,20 +206,36 @@ export abstract class ScraperModule {
 
         this.logger.info(logId, "Scraping");
 
+        let currentPageUrl = urlEntry.url;
+        let currentPageIndex = 1;
+        let currentPageCount = 1;
         try {
           let pages: string[];
           if (urlEntry.pagination) {
             await page.goto(urlEntry.url, { waitUntil: "domcontentloaded" });
             pages = await this.discoverPages(page, urlEntry.url, urlEntry.maxPages);
             this.logger.info(
-              { ...logId, totalPages: pages.length, maxPages: urlEntry.maxPages },
+              { ...logId, discoveredPages: pages.length, maxPages: urlEntry.maxPages },
               "Discovered pages",
             );
           } else {
             pages = [urlEntry.url];
           }
 
-          for (const pageUrl of pages) {
+          currentPageCount = pages.length;
+          for (let pageOffset = 0; pageOffset < pages.length; pageOffset++) {
+            const pageUrl = pages[pageOffset]!;
+            currentPageUrl = pageUrl;
+            currentPageIndex = pageOffset + 1;
+            const pageLogId = {
+              ...logId,
+              pageIndex: currentPageIndex,
+              pageCount: currentPageCount,
+              pageUrl,
+            };
+
+            this.logger.info(pageLogId, "Scraping page");
+
             if (pageUrl !== urlEntry.url || !urlEntry.pagination) {
               await page.goto(pageUrl, { waitUntil: "domcontentloaded" });
             }
@@ -225,13 +266,22 @@ export abstract class ScraperModule {
             }
 
             this.logger.info(
-              { ...logId, count: listings.length, ...(filteredOut > 0 ? { filtered: filteredOut } : {}) },
+              { ...pageLogId, count: listings.length, ...(filteredOut > 0 ? { filtered: filteredOut } : {}) },
               "Parsed listings from page",
             );
             allListings.push(...listings);
           }
         } catch (error) {
-          this.logger.error({ ...logId, err: error }, "Failed to scrape URL");
+          this.logger.error(
+            {
+              ...logId,
+              pageIndex: currentPageIndex,
+              pageCount: currentPageCount,
+              pageUrl: currentPageUrl,
+              err: error,
+            },
+            "Failed to scrape URL",
+          );
           this.lastFailedUrls.push(urlEntry.url);
           // Capture a fallback snapshot when the module-level code didn't already
           // record one (e.g. unexpected Playwright timeout / navigation error).

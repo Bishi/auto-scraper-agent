@@ -118,10 +118,94 @@ describe("ScraperModule source attribution", () => {
     expect(info).toHaveBeenCalledWith(
       expect.objectContaining({
         nickname: "Dealer A",
-        totalPages: 2,
+        discoveredPages: 2,
         maxPages: 2,
       }),
       "Discovered pages",
+    );
+  });
+
+  it("logs the current page breadcrumb before and after scraping paginated pages", async () => {
+    class PaginatedTestModule extends TestModule {
+      async discoverPages(_page: Page, url: string, maxPages: number): Promise<string[]> {
+        return [url, `${url}?stran=2`].slice(0, maxPages);
+      }
+    }
+
+    const testLogger = logger();
+    const info = vi.mocked(testLogger.info);
+    const module = new PaginatedTestModule({
+      name: "test-module",
+      displayName: "Test Module",
+      urls: [{
+        url: "https://example.com/search",
+        enabled: true,
+        nickname: "Dealer A",
+        pagination: true,
+        maxPages: 2,
+      }],
+    }, testLogger);
+
+    await module.run(page());
+
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nickname: "Dealer A",
+        pageIndex: 2,
+        pageCount: 2,
+        pageUrl: "https://example.com/search?stran=2",
+      }),
+      "Scraping page",
+    );
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nickname: "Dealer A",
+        pageIndex: 2,
+        pageCount: 2,
+        pageUrl: "https://example.com/search?stran=2",
+        count: 2,
+      }),
+      "Parsed listings from page",
+    );
+  });
+
+  it("logs the page that failed during paginated scraping", async () => {
+    class FailingPaginatedTestModule extends TestModule {
+      async discoverPages(_page: Page, url: string, maxPages: number): Promise<string[]> {
+        return [url, `${url}?stran=2`].slice(0, maxPages);
+      }
+
+      async scrape(_page: Page, url: string): Promise<Listing[]> {
+        if (url.includes("stran=2")) throw new Error("blocked");
+        return [listing("kept", 150)];
+      }
+    }
+
+    const testLogger = logger();
+    const error = vi.mocked(testLogger.error);
+    const module = new FailingPaginatedTestModule({
+      name: "test-module",
+      displayName: "Test Module",
+      urls: [{
+        url: "https://example.com/search",
+        enabled: true,
+        nickname: "Dealer A",
+        pagination: true,
+        maxPages: 2,
+      }],
+    }, testLogger);
+
+    await module.run(page());
+
+    expect(error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nickname: "Dealer A",
+        pageIndex: 2,
+        pageCount: 2,
+        pageUrl: "https://example.com/search?stran=2",
+        err: expect.any(Error),
+      }),
+      "Failed to scrape URL",
     );
   });
 });
