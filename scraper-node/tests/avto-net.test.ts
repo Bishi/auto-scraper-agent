@@ -3,6 +3,11 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseListings } from "../src/shared/modules/avto-net/parser.js";
+import {
+  buildSequentialStranPageUrls,
+  buildStranPageUrl,
+  extractAvtoNetResultCount,
+} from "../src/shared/modules/avto-net/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string) =>
@@ -12,6 +17,28 @@ const SOURCE_URL =
   "https://www.avto.net/Ads/results.asp?znamka=bmw&tip=320d&cType=1";
 
 describe("avto-net parser", () => {
+  describe("pagination helpers", () => {
+    it("extracts displayed result count from current avto.net copy", () => {
+      expect(extractAvtoNetResultCount("Prikazano 668 oglasov:")).toBe(668);
+    });
+
+    it("extracts dot-thousands formatted result counts", () => {
+      expect(extractAvtoNetResultCount("Prikazano 1.234 oglasov:")).toBe(1234);
+    });
+
+    it("builds stran page URLs when the configured URL has an empty page parameter", () => {
+      expect(buildStranPageUrl(`${SOURCE_URL}&stran=`, 3)).toBe(`${SOURCE_URL}&stran=3`);
+    });
+
+    it("continues sequential fallback pages from the configured page", () => {
+      expect(buildSequentialStranPageUrls(`${SOURCE_URL}&stran=3`, 3, null)).toEqual([
+        `${SOURCE_URL}&stran=3`,
+        `${SOURCE_URL}&stran=4`,
+        `${SOURCE_URL}&stran=5`,
+      ]);
+    });
+  });
+
   describe("standard listing layout", () => {
     it("parses both listings from fixture", () => {
       const listings = parseListings(fixture("standard.html"), SOURCE_URL);

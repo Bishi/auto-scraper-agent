@@ -29,6 +29,6 @@ export const SELECTORS = {
   dataContainer: ".GO-Results-Data, .GO-Results-Top-Data-Top",
   /** Pagination: next page link */
   nextPage: ".GO-Rounded-R",
-  /** Pagination: page number links */
-  pageLinks: ".GO-Pager-Pair a",
+  /** Pagination links. Current avto.net markup exposes only Prev/Next in #GO-naviprevnext. */
+  pageLinks: "#GO-naviprevnext a.page-link[href], .GO-Pager-Pair a[href]",
 } as const;

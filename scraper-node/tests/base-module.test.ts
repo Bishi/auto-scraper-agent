@@ -90,4 +90,38 @@ describe("ScraperModule source attribution", () => {
     expect(module.lastFilteredListings[0]?.sourceUrl).toBe("https://example.com/search");
     expect(module.lastFilteredListings[0]?.sourceUrlNickname).toBe("Dealer A");
   });
+
+  it("logs discovered pages with the source nickname in parallel runs", async () => {
+    class PaginatedTestModule extends TestModule {
+      async discoverPages(_page: Page, url: string, maxPages: number): Promise<string[]> {
+        return [url, `${url}?stran=2`].slice(0, maxPages);
+      }
+    }
+
+    const testLogger = logger();
+    const info = vi.mocked(testLogger.info);
+    const module = new PaginatedTestModule({
+      name: "test-module",
+      displayName: "Test Module",
+      urls: [{
+        url: "https://example.com/search",
+        enabled: true,
+        nickname: "Dealer A",
+        pagination: true,
+        maxPages: 2,
+      }],
+      options: { parallelUrls: true },
+    }, testLogger);
+
+    await module.run(page(), async () => page());
+
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nickname: "Dealer A",
+        totalPages: 2,
+        maxPages: 2,
+      }),
+      "Discovered pages",
+    );
+  });
 });

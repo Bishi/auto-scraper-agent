@@ -4,6 +4,69 @@ import { ScraperModule, type ScraperModuleConfig } from "../base.js";
 import { parseListings } from "./parser.js";
 import { SELECTORS } from "./selectors.js";
 
+const AVTO_NET_PAGE_SIZE = 48;
+
+function normalizeAvtoNetPageUrl(href: string, baseUrl: string): string | null {
+  try {
+    return new URL(href, baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+export function buildStranPageUrl(baseUrl: string, pageNumber: number): string | null {
+  try {
+    const parsed = new URL(baseUrl);
+    parsed.searchParams.set("stran", String(pageNumber));
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function getStranPageNumber(pageUrl: string): number {
+  try {
+    const raw = new URL(pageUrl).searchParams.get("stran");
+    if (!raw) return 1;
+    const pageNumber = Number.parseInt(raw, 10);
+    return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : 1;
+  } catch {
+    return 1;
+  }
+}
+
+export function extractAvtoNetResultCount(text: string): number | null {
+  const match = text.match(/Prikazano\s+([\d.]+)\s+oglasov/i);
+  if (!match?.[1]) return null;
+  const count = Number.parseInt(match[1].replace(/\./g, ""), 10);
+  return Number.isFinite(count) ? count : null;
+}
+
+export function buildSequentialStranPageUrls(
+  baseUrl: string,
+  maxPages: number,
+  totalResults: number | null,
+): string[] {
+  const pages = [baseUrl];
+  const seen = new Set<string>(pages);
+  const currentPageNumber = getStranPageNumber(baseUrl);
+  const totalPages = totalResults == null
+    ? currentPageNumber + maxPages - 1
+    : Math.max(1, Math.ceil(totalResults / AVTO_NET_PAGE_SIZE));
+  const pageLimit = Math.min(currentPageNumber + maxPages - 1, totalPages);
+
+  for (let pageNumber = currentPageNumber + 1; pageNumber <= pageLimit; pageNumber++) {
+    if (pages.length >= maxPages) break;
+    const pageUrl = buildStranPageUrl(baseUrl, pageNumber);
+    if (pageUrl && !seen.has(pageUrl)) {
+      seen.add(pageUrl);
+      pages.push(pageUrl);
+    }
+  }
+
+  return pages;
+}
+
 export class AvtoNetModule extends ScraperModule {
   constructor(config: ScraperModuleConfig, logger: import("pino").Logger) {
     super({ ...config, name: "avto-net", displayName: "Avto.net" }, logger);
@@ -149,6 +212,7 @@ export class AvtoNetModule extends ScraperModule {
     // Find all pagination links to determine total pages
     const pageLinks = await page.$$(SELECTORS.pageLinks);
     const pageUrls = new Set<string>([url]);
+    const currentPageNumber = getStranPageNumber(url);
 
     for (const link of pageLinks) {
       if (pageUrls.size >= maxPages) break;
@@ -156,17 +220,29 @@ export class AvtoNetModule extends ScraperModule {
       const href = await link.getAttribute("href");
       if (!href) continue;
 
-      const fullUrl = href.startsWith("http")
-        ? href
-        : `https://www.avto.net${href.startsWith("/") ? "" : "/"}${href}`;
-
-      if (!pageUrls.has(fullUrl)) {
+      const fullUrl = normalizeAvtoNetPageUrl(href, url);
+      if (fullUrl && getStranPageNumber(fullUrl) <= currentPageNumber) continue;
+      if (fullUrl && !pageUrls.has(fullUrl)) {
         pageUrls.add(fullUrl);
         pages.push(fullUrl);
       }
     }
 
-    this.logger.info({ totalPages: pages.length, maxPages }, "Discovered pages");
+    if (pages.length < maxPages && maxPages > 1) {
+      const listingCount = await page.$$(SELECTORS.listingRow).then((rows) => rows.length).catch(() => 0);
+      const bodyText = await page.textContent("body").catch(() => "");
+      const totalResults = bodyText ? extractAvtoNetResultCount(bodyText) : null;
+      if (listingCount >= AVTO_NET_PAGE_SIZE || (totalResults ?? 0) > AVTO_NET_PAGE_SIZE) {
+        for (const pageUrl of buildSequentialStranPageUrls(url, maxPages, totalResults)) {
+          if (pages.length >= maxPages) break;
+          if (!pageUrls.has(pageUrl)) {
+            pageUrls.add(pageUrl);
+            pages.push(pageUrl);
+          }
+        }
+      }
+    }
+
     return pages.slice(0, maxPages);
   }
 }

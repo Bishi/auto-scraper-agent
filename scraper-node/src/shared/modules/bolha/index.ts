@@ -105,7 +105,6 @@ export class BolhaModule extends ScraperModule {
       }
     }
 
-    this.logger.info({ totalPages: pages.length, maxPages }, "Discovered pages");
     return pages.slice(0, maxPages);
   }
 }

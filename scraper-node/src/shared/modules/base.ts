@@ -101,6 +101,10 @@ export abstract class ScraperModule {
           if (urlEntry.pagination) {
             await p.goto(urlEntry.url, { waitUntil: "domcontentloaded" });
             pages = await this.discoverPages(p, urlEntry.url, urlEntry.maxPages);
+            this.logger.info(
+              { ...logId, totalPages: pages.length, maxPages: urlEntry.maxPages },
+              "Discovered pages",
+            );
           } else {
             pages = [urlEntry.url];
           }
@@ -182,6 +186,10 @@ export abstract class ScraperModule {
           if (urlEntry.pagination) {
             await page.goto(urlEntry.url, { waitUntil: "domcontentloaded" });
             pages = await this.discoverPages(page, urlEntry.url, urlEntry.maxPages);
+            this.logger.info(
+              { ...logId, totalPages: pages.length, maxPages: urlEntry.maxPages },
+              "Discovered pages",
+            );
           } else {
             pages = [urlEntry.url];
           }
