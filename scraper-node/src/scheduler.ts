@@ -1,4 +1,8 @@
-import { describeAgentApiError, type AgentApiClient } from "./api-client.js";
+import {
+  describeAgentApiError,
+  isTransientAgentApiError,
+  type AgentApiClient,
+} from "./api-client.js";
 import { runModule } from "./scraper.js";
 import { agentLogger, pushScraperLog } from "./logger.js";
 import type { DbConfig, LogEntry } from "./shared/types.js";
@@ -35,6 +39,8 @@ export class Scheduler {
   private _pendingAckCommandId: string | null = null;
   /** Job public id currently being scraped, or null when idle. Sent in every heartbeat for server reconciliation. */
   private _activeJobPublicId: string | null = null;
+  /** Consecutive transient heartbeat failures, coalesced to avoid noisy startup logs. */
+  private transientHeartbeatFailures = 0;
   /** True while a scrape cycle is actively executing. */
   get isRunning(): boolean { return this._running; }
   /** True when the scheduler is paused (heartbeat continues but scrapes are suspended). */
@@ -241,6 +247,10 @@ export class Scheduler {
         .heartbeat(this._version, process.platform, this.currentHeartbeatOptions())
         .then((res) => {
           if (!this._started) return;
+          if (this.transientHeartbeatFailures >= 3) {
+            agentLogger.info("[agent] Heartbeat recovered");
+          }
+          this.transientHeartbeatFailures = 0;
           // Drop local ack target once the server clears pending (same commandId no longer returned).
           if (this._pendingAckCommandId) {
             const stillPending = res.commandId === this._pendingAckCommandId;
@@ -267,6 +277,18 @@ export class Scheduler {
           }
         })
         .catch((err: unknown) => {
+          if (isTransientAgentApiError(err)) {
+            this.transientHeartbeatFailures += 1;
+            if (
+              this.transientHeartbeatFailures === 3 ||
+              (this.transientHeartbeatFailures > 3 && this.transientHeartbeatFailures % 5 === 0)
+            ) {
+              agentLogger.warn("[agent] Heartbeat delayed: " + describeAgentApiError(err));
+            }
+            return;
+          }
+
+          this.transientHeartbeatFailures = 0;
           agentLogger.error("[agent] Heartbeat failed: " + describeAgentApiError(err));
         });
     };
@@ -300,13 +322,18 @@ export class Scheduler {
 
       await this.scrapeAll(client, config, jobMap, trigger, scope);
     } catch (err) {
-      const errMsg = String(err);
-      agentLogger.error("[agent] Scrape cycle failed: " + errMsg);
-      Promise.resolve(client.heartbeat(
-        this._version,
-        process.platform,
-        this.currentHeartbeatOptions({ failureMsg: errMsg }),
-      )).catch(() => {});
+      const errMsg = describeAgentApiError(err);
+      if (isTransientAgentApiError(err)) {
+        intervalMs = Math.min(intervalMs, 5 * 60 * 1000);
+        agentLogger.warn("[agent] Scrape cycle delayed: " + errMsg);
+      } else {
+        agentLogger.error("[agent] Scrape cycle failed: " + errMsg);
+        Promise.resolve(client.heartbeat(
+          this._version,
+          process.platform,
+          this.currentHeartbeatOptions({ failureMsg: errMsg }),
+        )).catch(() => {});
+      }
     } finally {
       this._running = false;
     }

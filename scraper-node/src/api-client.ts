@@ -5,16 +5,29 @@ function stringifyAgentApiError(err: unknown): string {
   return String(err);
 }
 
+function isNetworkFetchFailure(raw: string): boolean {
+  const normalized = raw.toLowerCase();
+  return (
+    normalized.includes("typeerror: fetch failed") ||
+    normalized.includes("typeerror: failed to fetch")
+  );
+}
+
+function isServiceUnavailableApiError(raw: string): boolean {
+  return /api\s+\w+\s+.+(?:→|->)\s*503:/i.test(raw);
+}
+
+export function isTransientAgentApiError(err: unknown): boolean {
+  const raw = stringifyAgentApiError(err);
+  return isNetworkFetchFailure(raw) || isServiceUnavailableApiError(raw);
+}
+
 export function describeAgentApiError(err: unknown): string {
   const raw = stringifyAgentApiError(err);
-  const normalized = raw.toLowerCase();
-  const isNetworkFetchFailure =
-    normalized.includes("typeerror: fetch failed") ||
-    normalized.includes("typeerror: failed to fetch");
-
-  if (isNetworkFetchFailure) {
+  if (isNetworkFetchFailure(raw)) {
     return `could not connect to the server (${raw})`;
   }
+  if (isServiceUnavailableApiError(raw)) return "server temporarily unavailable; will retry";
 
   return raw;
 }

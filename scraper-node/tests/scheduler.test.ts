@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Scheduler } from "../src/scheduler.js";
 import type { AgentApiClient, HeartbeatOptions } from "../src/api-client.js";
 import { runModule } from "../src/scraper.js";
-import { SCRAPER_LOG_BUFFER } from "../src/logger.js";
+import { agentLogger, SCRAPER_LOG_BUFFER } from "../src/logger.js";
 
 vi.mock("../src/scraper.js", () => ({
   runModule: vi.fn(),
@@ -306,6 +306,43 @@ describe("Scheduler - heartbeat pause/resume", () => {
       expect(s.isPaused).toBe(false);
       s.stop();
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("coalesces transient heartbeat failures during startup", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(agentLogger, "warn").mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(agentLogger, "error").mockImplementation(() => undefined);
+    try {
+      const client = mockClient();
+      const hb = vi
+        .fn()
+        .mockRejectedValue(new Error('API POST /api/agent/heartbeat → 503: {"code":"DATABASE_UNAVAILABLE"}'));
+      (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+
+      const s = new Scheduler();
+      s.start(client as AgentApiClient, "1.0.0", true);
+
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(2));
+
+      expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining("Heartbeat failed"));
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("Heartbeat delayed"));
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(3));
+
+      expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining("Heartbeat failed"));
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[agent] Heartbeat delayed: server temporarily unavailable; will retry",
+      );
+
+      s.stop();
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
       vi.useRealTimers();
     }
   });
