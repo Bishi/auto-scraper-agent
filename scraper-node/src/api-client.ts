@@ -1,3 +1,4 @@
+import { gzipSync } from "node:zlib";
 import type { Listing, LogEntry, DbConfig, DiffSummary, DebugSnapshotData } from "./shared/types.js";
 
 function stringifyAgentApiError(err: unknown): string {
@@ -144,9 +145,11 @@ export class AgentApiClient {
   }
 
   async pushResults(params: PushResultsParams): Promise<PushResultsResponse> {
+    const compressedBody = gzipSync(JSON.stringify(params));
     return this.request<PushResultsResponse>("/api/agent/results", {
       method: "POST",
-      body: JSON.stringify(params),
+      headers: { "Content-Encoding": "gzip" },
+      body: compressedBody,
     });
   }
 
