@@ -5,6 +5,25 @@ import { parseListings } from "./parser.js";
 import { SELECTORS } from "./selectors.js";
 
 const AVTO_NET_PAGE_SIZE = 48;
+const DEBUG_HTML_LIMIT = 2_000_000;
+const DEBUG_HTML_HEAD_CHARS = 20_000;
+
+function trimDebugHtml(raw: string, anchor?: string): string {
+  if (raw.length <= DEBUG_HTML_LIMIT) return raw;
+  if (!anchor) return raw.slice(0, DEBUG_HTML_LIMIT);
+
+  const anchorIndex = raw.indexOf(anchor);
+  if (anchorIndex < DEBUG_HTML_LIMIT - DEBUG_HTML_HEAD_CHARS) {
+    return raw.slice(0, DEBUG_HTML_LIMIT);
+  }
+
+  const marker = `\n<!-- DEBUG SNAPSHOT TRUNCATED: preserved content around "${anchor}" at char ${anchorIndex}. -->\n`;
+  const head = raw.slice(0, DEBUG_HTML_HEAD_CHARS);
+  const windowLength = DEBUG_HTML_LIMIT - head.length - marker.length;
+  const windowStart = Math.max(0, anchorIndex - Math.floor(windowLength / 2));
+  return `${head}${marker}${raw.slice(windowStart, windowStart + windowLength)}`;
+}
+
 function normalizeAvtoNetPageUrl(href: string, baseUrl: string): string | null {
   try {
     return new URL(href, baseUrl).toString();
@@ -132,7 +151,7 @@ export class AvtoNetModule extends ScraperModule {
       CF_CHALLENGE_TITLES.some((t) => title.toLowerCase().includes(t));
 
     const ready = await page
-      .waitForSelector(SELECTORS.listingRow, { timeout: 15000 })
+      .waitForSelector(SELECTORS.listingRow, { timeout: 15000, state: "attached" })
       .then(() => true)
       .catch(async () => {
         // Check if we're stuck on a Cloudflare managed challenge page.
@@ -190,7 +209,7 @@ export class AvtoNetModule extends ScraperModule {
 
           this.logger.info({ url }, "Cloudflare JS challenge — waiting up to 30s for auto-resolution");
           // Throws on timeout → propagates to base.ts as a failed URL (same as before)
-          await page.waitForSelector(SELECTORS.listingRow, { timeout: 30000 });
+          await page.waitForSelector(SELECTORS.listingRow, { timeout: 30000, state: "attached" });
           return true;
         }
 
@@ -215,7 +234,7 @@ export class AvtoNetModule extends ScraperModule {
 
       const captureHtml = async (): Promise<string> => {
         const raw = await page.content().catch(() => "");
-        return raw.length > 2_000_000 ? raw.slice(0, 2_000_000) : raw;
+        return trimDebugHtml(raw, SELECTORS.listingRow.slice(1));
       };
 
       // A Cloudflare managed challenge keeps the browser on the original
@@ -254,7 +273,7 @@ export class AvtoNetModule extends ScraperModule {
     const pages = [url];
 
     try {
-      await page.waitForSelector(SELECTORS.listingRow, { timeout: 15000 });
+      await page.waitForSelector(SELECTORS.listingRow, { timeout: 15000, state: "attached" });
     } catch {
       return pages;
     }

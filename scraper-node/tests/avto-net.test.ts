@@ -169,6 +169,27 @@ describe("avto-net parser", () => {
         "Pagination click did not confirm navigation",
       );
     });
+
+    it("scrapes attached rows without requiring them to be visible", async () => {
+      const testPage = {
+        waitForSelector: vi.fn().mockResolvedValue({}),
+        content: vi.fn().mockResolvedValue(fixture("standard.html")),
+      } as unknown as Page;
+
+      const module = new AvtoNetModule({
+        name: "avto-net",
+        displayName: "Avto.net",
+        urls: [],
+      }, testLogger());
+
+      const listings = await module.scrape(testPage, SOURCE_URL);
+
+      expect(listings).toHaveLength(2);
+      expect(testPage.waitForSelector).toHaveBeenCalledWith(
+        ".GO-Results-Row",
+        { timeout: 15000, state: "attached" },
+      );
+    });
   });
 
   describe("standard listing layout", () => {
