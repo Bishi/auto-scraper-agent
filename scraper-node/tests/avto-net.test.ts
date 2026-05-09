@@ -233,6 +233,36 @@ describe("avto-net parser", () => {
         `${SOURCE_URL}&stran=2`,
       ]);
     });
+
+    it("marks unresolved Cloudflare JS challenges as failed URLs", async () => {
+      let challengeDetectionCalls = 0;
+      const testPage = {
+        goto: vi.fn().mockResolvedValue(undefined),
+        waitForTimeout: vi.fn().mockResolvedValue(undefined),
+        waitForSelector: vi.fn().mockRejectedValue(new Error("timeout")),
+        evaluate: vi.fn().mockImplementation((_fn: unknown, arg?: unknown) => {
+          if (arg === ".GO-Results-Row") return Promise.resolve(false);
+          challengeDetectionCalls += 1;
+          return Promise.resolve(challengeDetectionCalls === 1);
+        }),
+        content: vi.fn().mockResolvedValue("<html><title>Just a moment...</title></html>"),
+      } as unknown as Page;
+
+      const module = new AvtoNetModule({
+        name: "avto-net",
+        displayName: "Avto.net",
+        urls: [{
+          url: SOURCE_URL,
+          enabled: true,
+          nickname: "BMW",
+          pagination: false,
+          maxPages: 1,
+        }],
+      }, testLogger());
+
+      await expect(module.run(testPage)).resolves.toEqual([]);
+      expect(module.lastFailedUrls).toEqual([SOURCE_URL]);
+    });
   });
 
   describe("standard listing layout", () => {

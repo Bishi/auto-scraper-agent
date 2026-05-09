@@ -225,8 +225,10 @@ export class AvtoNetModule extends ScraperModule {
           }
 
           this.logger.info({ url }, "Cloudflare JS challenge — waiting up to 30s for auto-resolution");
-          // Throws on timeout → propagates to base.ts as a failed URL (same as before)
-          return waitForListingRows(page, 30000);
+          if (await waitForListingRows(page, 30000)) {
+            return true;
+          }
+          throw new Error("Cloudflare JS challenge did not resolve");
         }
 
         return false; // genuinely empty results page
@@ -298,11 +300,7 @@ export class AvtoNetModule extends ScraperModule {
   async discoverPages(page: Page, url: string, maxPages: number): Promise<string[]> {
     const pages = [url];
 
-    try {
-      if (!(await waitForListingRows(page, 15000))) {
-        return pages;
-      }
-    } catch {
+    if (!(await waitForListingRows(page, 15000))) {
       return pages;
     }
 
