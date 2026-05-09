@@ -53,6 +53,23 @@ function getStranPageNumber(pageUrl: string): number {
   }
 }
 
+async function hasListingRows(page: Page): Promise<boolean> {
+  return page
+    .evaluate((selector) => !!document.querySelector(selector), SELECTORS.listingRow)
+    .catch(() => false);
+}
+
+async function waitForListingRows(page: Page, timeout: number): Promise<boolean> {
+  try {
+    await page.waitForSelector(SELECTORS.listingRow, { timeout, state: "attached" });
+    return true;
+  } catch {
+    // avto.net can attach result rows just after Playwright's wait times out,
+    // especially when many searches run in parallel.
+    return hasListingRows(page);
+  }
+}
+
 export function extractAvtoNetResultCount(text: string): number | null {
   const match = text.match(/Prikazano\s+([\d.]+)\s+oglasov/i);
   if (!match?.[1]) return null;
@@ -150,10 +167,10 @@ export class AvtoNetModule extends ScraperModule {
     const isChallengeTitle = (title: string) =>
       CF_CHALLENGE_TITLES.some((t) => title.toLowerCase().includes(t));
 
-    const ready = await page
-      .waitForSelector(SELECTORS.listingRow, { timeout: 15000, state: "attached" })
-      .then(() => true)
-      .catch(async () => {
+    const ready = await waitForListingRows(page, 15000)
+      .then(async (foundRows) => {
+        if (foundRows) return true;
+
         // Check if we're stuck on a Cloudflare managed challenge page.
         // Cloudflare localises the page title — check both the DOM and a set of
         // known titles (English + Slovenian, matching our locale: "sl-SI").
@@ -209,8 +226,7 @@ export class AvtoNetModule extends ScraperModule {
 
           this.logger.info({ url }, "Cloudflare JS challenge — waiting up to 30s for auto-resolution");
           // Throws on timeout → propagates to base.ts as a failed URL (same as before)
-          await page.waitForSelector(SELECTORS.listingRow, { timeout: 30000, state: "attached" });
-          return true;
+          return waitForListingRows(page, 30000);
         }
 
         return false; // genuinely empty results page
@@ -254,6 +270,16 @@ export class AvtoNetModule extends ScraperModule {
         this.logger.error({ url, pageTitle, pageUrl }, errorMsg);
         this.addDebugSnapshot({ moduleName: this.name, sourceUrl: url, errorType: "redirect", errorMsg, html: await captureHtml(), capturedAt: new Date().toISOString() });
       } else if (hasActualRows) {
+        const html = await page.content();
+        const listings = parseListings(html, url);
+        if (listings.length > 0) {
+          this.logger.warn(
+            { url, pageTitle, pageUrl, count: listings.length },
+            "Listing rows appeared after readiness timeout - parsed attached rows",
+          );
+          return listings;
+        }
+
         // Right page, rows exist in the DOM, but our selector didn't match — class name changed
         const errorMsg = "Item selector (.GO-Results-Row) not found by configured selector — avto.net may have changed their HTML";
         this.logger.error({ url, pageTitle, pageUrl }, errorMsg);
@@ -273,7 +299,9 @@ export class AvtoNetModule extends ScraperModule {
     const pages = [url];
 
     try {
-      await page.waitForSelector(SELECTORS.listingRow, { timeout: 15000, state: "attached" });
+      if (!(await waitForListingRows(page, 15000))) {
+        return pages;
+      }
     } catch {
       return pages;
     }

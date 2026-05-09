@@ -190,6 +190,49 @@ describe("avto-net parser", () => {
         { timeout: 15000, state: "attached" },
       );
     });
+
+    it("parses rows that appear just after the readiness wait times out", async () => {
+      const testPage = {
+        waitForSelector: vi.fn().mockRejectedValue(new Error("timeout")),
+        evaluate: vi.fn().mockResolvedValue(true),
+        content: vi.fn().mockResolvedValue(fixture("standard.html")),
+      } as unknown as Page;
+
+      const module = new AvtoNetModule({
+        name: "avto-net",
+        displayName: "Avto.net",
+        urls: [],
+      }, testLogger());
+
+      const listings = await module.scrape(testPage, SOURCE_URL);
+
+      expect(listings).toHaveLength(2);
+      expect(testPage.content).toHaveBeenCalled();
+    });
+
+    it("discovers sequential pages when rows appear just after the readiness wait times out", async () => {
+      const testPage = {
+        waitForSelector: vi.fn().mockRejectedValue(new Error("timeout")),
+        evaluate: vi.fn().mockResolvedValue(true),
+        $$: vi.fn().mockImplementation((selector: string) => {
+          if (selector.includes("GO-naviprevnext")) return Promise.resolve([]);
+          if (selector === ".GO-Results-Row") return Promise.resolve(Array.from({ length: 48 }, () => ({})));
+          return Promise.resolve([]);
+        }),
+        textContent: vi.fn().mockResolvedValue("Prikazano 96 oglasov:"),
+      } as unknown as Page;
+
+      const module = new AvtoNetModule({
+        name: "avto-net",
+        displayName: "Avto.net",
+        urls: [],
+      }, testLogger());
+
+      await expect(module.discoverPages(testPage, SOURCE_URL, 2)).resolves.toEqual([
+        SOURCE_URL,
+        `${SOURCE_URL}&stran=2`,
+      ]);
+    });
   });
 
   describe("standard listing layout", () => {
