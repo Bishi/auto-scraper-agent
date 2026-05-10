@@ -11,6 +11,7 @@ import {
   buildSequentialStranPageUrls,
   buildStranPageUrl,
   extractAvtoNetResultCount,
+  waitForListingImageCandidates,
 } from "../src/shared/modules/avto-net/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -191,6 +192,92 @@ describe("avto-net parser", () => {
       );
     });
 
+    it("waits for usable image candidates after rows appear before parsing content", async () => {
+      const waitForSelector = vi.fn().mockResolvedValue({});
+      const waitForFunction = vi.fn().mockResolvedValue({});
+      const content = vi.fn().mockResolvedValue(fixture("standard.html"));
+      const testPage = {
+        waitForSelector,
+        waitForFunction,
+        evaluate: vi.fn().mockResolvedValue({ rowCount: 2, imageCandidateCount: 1 }),
+        content,
+      } as unknown as Page;
+
+      const module = new AvtoNetModule({
+        name: "avto-net",
+        displayName: "Avto.net",
+        urls: [],
+      }, testLogger());
+
+      const listings = await module.scrape(testPage, SOURCE_URL);
+
+      expect(listings).toHaveLength(2);
+      expect(waitForFunction).toHaveBeenCalledWith(
+        expect.any(Function),
+        expect.objectContaining({
+          rowSelector: ".GO-Results-Row",
+          candidateSelector: expect.stringContaining(".GO-Results-Row img[src]"),
+        }),
+        { timeout: expect.any(Number) },
+      );
+      expect(waitForSelector.mock.invocationCallOrder[0]!).toBeLessThan(
+        waitForFunction.mock.invocationCallOrder[0]!,
+      );
+      expect(waitForFunction.mock.invocationCallOrder[0]!).toBeLessThan(
+        content.mock.invocationCallOrder[0]!,
+      );
+    });
+
+    it("parses rows and warns when image candidates never appear", async () => {
+      const logger = testLogger();
+      const warn = vi.mocked(logger.warn);
+      const testPage = {
+        waitForSelector: vi.fn().mockResolvedValue({}),
+        waitForFunction: vi.fn().mockRejectedValue(new Error("image candidate timeout")),
+        evaluate: vi.fn().mockResolvedValue({ rowCount: 2, imageCandidateCount: 0 }),
+        content: vi.fn().mockResolvedValue(fixture("standard.html")),
+      } as unknown as Page;
+
+      const module = new AvtoNetModule({
+        name: "avto-net",
+        displayName: "Avto.net",
+        urls: [],
+      }, logger);
+
+      const listings = await module.scrape(testPage, SOURCE_URL);
+
+      expect(listings).toHaveLength(2);
+      expect(warn).toHaveBeenCalledWith(
+        {
+          url: SOURCE_URL,
+          rowCount: 2,
+          imageCandidateCount: 0,
+        },
+        "Timed out waiting for avto.net listing image candidates",
+      );
+    });
+
+    it("reports image candidate readiness from the helper", async () => {
+      const testPage = {
+        waitForFunction: vi.fn().mockResolvedValue({}),
+        evaluate: vi.fn().mockResolvedValue({ rowCount: 1, imageCandidateCount: 1 }),
+      } as unknown as Page;
+
+      await expect(waitForListingImageCandidates(testPage, 123)).resolves.toEqual({
+        found: true,
+        rowCount: 1,
+        imageCandidateCount: 1,
+      });
+      expect(testPage.waitForFunction).toHaveBeenCalledWith(
+        expect.any(Function),
+        expect.objectContaining({
+          rowSelector: ".GO-Results-Row",
+          candidateSelector: expect.stringContaining("img[data-original]"),
+        }),
+        { timeout: 123 },
+      );
+    });
+
     it("parses rows that appear just after the readiness wait times out", async () => {
       const testPage = {
         waitForSelector: vi.fn().mockRejectedValue(new Error("timeout")),
@@ -299,6 +386,21 @@ describe("avto-net parser", () => {
     it("extracts metadata.thumbnailUrl from the row image src", () => {
       const [listing] = parseListings(fixture("standard.html"), SOURCE_URL);
       expect(listing!.metadata["thumbnailUrl"]).toBe("https://img.avto.net/thumb/12345.jpg");
+    });
+
+    it("extracts metadata.thumbnailUrl from avto.net photo image src", () => {
+      const html = `
+        <div class="GO-Results-Row">
+          <img src="https://images.avto.net/photo/22390794/1049715_160.jpg" />
+          <div class="GO-Results-Naziv"><span>Mercedes-AMG GT 4 Door</span></div>
+          <a href="../Ads/details.asp?id=22390794">Poglej oglas</a>
+          <div class="GO-Results-Price-TXT-Regular">99.000 EUR</div>
+          <div class="GO-Results-Data"><table></table></div>
+        </div>`;
+      const [listing] = parseListings(html, SOURCE_URL);
+      expect(listing!.metadata["thumbnailUrl"]).toBe(
+        "https://images.avto.net/photo/22390794/1049715_160.jpg",
+      );
     });
 
     it("extracts second listing with correct sourceId and mileage", () => {

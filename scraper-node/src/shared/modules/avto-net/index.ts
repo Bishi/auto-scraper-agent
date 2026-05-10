@@ -7,6 +7,21 @@ import { SELECTORS } from "./selectors.js";
 const AVTO_NET_PAGE_SIZE = 48;
 const DEBUG_HTML_LIMIT = 2_000_000;
 const DEBUG_HTML_HEAD_CHARS = 20_000;
+const LISTING_IMAGE_CANDIDATE_TIMEOUT_MS = 2500;
+const LISTING_IMAGE_CANDIDATE_SELECTORS = [
+  `${SELECTORS.listingRow} img[src]`,
+  `${SELECTORS.listingRow} img[data-src]`,
+  `${SELECTORS.listingRow} img[data-original]`,
+].join(", ");
+
+type ListingImageCandidateStats = {
+  rowCount: number;
+  imageCandidateCount: number;
+};
+
+type ListingImageCandidateReadiness = ListingImageCandidateStats & {
+  found: boolean;
+};
 
 function trimDebugHtml(raw: string, anchor?: string): string {
   if (raw.length <= DEBUG_HTML_LIMIT) return raw;
@@ -68,6 +83,65 @@ async function waitForListingRows(page: Page, timeout: number): Promise<boolean>
     // especially when many searches run in parallel.
     return hasListingRows(page);
   }
+}
+
+async function getListingImageCandidateStats(page: Page): Promise<ListingImageCandidateStats> {
+  try {
+    return await page.evaluate(
+      ({ rowSelector, candidateSelector }) => {
+        const hasUsableImageValue = (img: Element): boolean =>
+          ["src", "data-src", "data-original"].some((attribute) => {
+            const value = img.getAttribute(attribute)?.trim() ?? "";
+            return value.length > 0 && !value.toLowerCase().startsWith("data:");
+          });
+
+        return {
+          rowCount: document.querySelectorAll(rowSelector).length,
+          imageCandidateCount: Array.from(document.querySelectorAll(candidateSelector))
+            .filter(hasUsableImageValue).length,
+        };
+      },
+      {
+        rowSelector: SELECTORS.listingRow,
+        candidateSelector: LISTING_IMAGE_CANDIDATE_SELECTORS,
+      },
+    );
+  } catch {
+    return { rowCount: 0, imageCandidateCount: 0 };
+  }
+}
+
+export async function waitForListingImageCandidates(
+  page: Page,
+  timeoutMs: number,
+): Promise<ListingImageCandidateReadiness> {
+  try {
+    await page.waitForFunction(
+      ({ rowSelector, candidateSelector }) => {
+        const hasUsableImageValue = (img: Element): boolean =>
+          ["src", "data-src", "data-original"].some((attribute) => {
+            const value = img.getAttribute(attribute)?.trim() ?? "";
+            return value.length > 0 && !value.toLowerCase().startsWith("data:");
+          });
+
+        return document.querySelectorAll(rowSelector).length > 0 &&
+          Array.from(document.querySelectorAll(candidateSelector)).some(hasUsableImageValue);
+      },
+      {
+        rowSelector: SELECTORS.listingRow,
+        candidateSelector: LISTING_IMAGE_CANDIDATE_SELECTORS,
+      },
+      { timeout: timeoutMs },
+    );
+  } catch {
+    // Missing thumbnails should not turn a valid search page into a failed scrape.
+  }
+
+  const stats = await getListingImageCandidateStats(page);
+  return {
+    ...stats,
+    found: stats.imageCandidateCount > 0,
+  };
 }
 
 export function extractAvtoNetResultCount(text: string): number | null {
@@ -291,6 +365,18 @@ export class AvtoNetModule extends ScraperModule {
         this.logger.warn({ url, pageTitle, pageUrl }, "Empty search results — no listings matched this query");
       }
       return [];
+    }
+
+    const imageReadiness = await waitForListingImageCandidates(page, LISTING_IMAGE_CANDIDATE_TIMEOUT_MS);
+    if (imageReadiness.rowCount > 0 && !imageReadiness.found) {
+      this.logger.warn(
+        {
+          url,
+          rowCount: imageReadiness.rowCount,
+          imageCandidateCount: imageReadiness.imageCandidateCount,
+        },
+        "Timed out waiting for avto.net listing image candidates",
+      );
     }
 
     const html = await page.content();
