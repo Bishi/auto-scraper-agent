@@ -76,6 +76,7 @@ const DiscordConfigSchema = z.object({
 });
 
 const NotificationsSchema = z.object({
+  enabled: z.boolean().optional(),
   email: EmailConfigSchema.optional(),
   discord: DiscordConfigSchema.optional(),
 });
