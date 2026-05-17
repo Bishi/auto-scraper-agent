@@ -17,13 +17,16 @@ process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.7.0";
+const AGENT_VERSION = "0.7.1";
+const REGISTRATION_RETRY_BASE_MS = 5_000;
+const REGISTRATION_RETRY_MAX_MS = 5 * 60_000;
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
 let client: AgentApiClient | null = null;
+let registrationRetryTimer: ReturnType<typeof setTimeout> | null = null;
 const scheduler = new Scheduler((paused) => {
   updateConfig({ schedulerPaused: paused });
 });
@@ -78,12 +81,49 @@ async function ensureAgentClient(config: AgentConfig): Promise<{
     credentialServerUrl: config.serverUrl,
     credentialApiKey: config.apiKey,
   };
-  writeConfig(nextConfig);
   return {
     client: new AgentApiClient(nextConfig.serverUrl, nextConfig.agentId, nextConfig.agentSecret),
     config: nextConfig,
     registered: true,
   };
+}
+
+function clearRegistrationRetry(): void {
+  if (registrationRetryTimer) clearTimeout(registrationRetryTimer);
+  registrationRetryTimer = null;
+}
+
+function registrationRetryDelay(attempt: number): number {
+  return Math.min(REGISTRATION_RETRY_BASE_MS * 2 ** attempt, REGISTRATION_RETRY_MAX_MS);
+}
+
+async function startConfiguredAgent(config: AgentConfig): Promise<void> {
+  const ensured = await ensureAgentClient(config);
+  writeConfig(ensured.config);
+  client = ensured.client;
+  if (ensured.registered) {
+    agentLogger.info(`[agent] Registered device ${ensured.config.agentId}`);
+  }
+  scheduler.start(client, AGENT_VERSION, ensured.config.schedulerPaused ?? false);
+}
+
+function startSavedConfigWithRetry(config: AgentConfig, attempt = 0): void {
+  clearRegistrationRetry();
+  void startConfiguredAgent(config)
+    .then(() => {
+      clearRegistrationRetry();
+    })
+    .catch((err: unknown) => {
+      const delay = registrationRetryDelay(attempt);
+      agentLogger.error(
+        `[agent] Failed to register saved config: ${String(err)}; retrying in ${Math.round(delay / 1000)}s`,
+      );
+      registrationRetryTimer = setTimeout(() => {
+        const latest = readConfig();
+        if (!latest) return;
+        startSavedConfigWithRetry(latest, attempt + 1);
+      }, delay);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -198,8 +238,9 @@ const server = http.createServer((req, res) => {
         const nextConfig: AgentConfig = keepExistingCredentials
           ? { ...previous, apiKey: resolvedKey, serverUrl }
           : { apiKey: resolvedKey, serverUrl, schedulerPaused: previous?.schedulerPaused };
-        writeConfig(nextConfig);
         const ensured = await ensureAgentClient(nextConfig);
+        writeConfig(ensured.config);
+        clearRegistrationRetry();
         client = ensured.client;
         scheduler.stop();
         scheduler.start(client, AGENT_VERSION, ensured.config.schedulerPaused ?? false);
@@ -223,9 +264,7 @@ const server = http.createServer((req, res) => {
                 : `, apiKey unchanged (tail ...${keyTail})`),
           );
         }
-        if (ensured.registered) {
-          agentLogger.info(`[agent] Registered device ${ensured.config.agentId}`);
-        }
+        if (ensured.registered) agentLogger.info(`[agent] Registered device ${ensured.config.agentId}`);
         return sendJson(res, 200, { ok: true });
       }
 
@@ -312,17 +351,7 @@ process.on("SIGTERM", () => shutdownFromSignal("SIGTERM"));
 const storedConfig = readConfig();
 if (storedConfig) {
   agentLogger.info(`[agent] Loaded saved config: serverUrl=${storedConfig.serverUrl}`);
-  ensureAgentClient(storedConfig)
-    .then((ensured) => {
-      client = ensured.client;
-      if (ensured.registered) {
-        agentLogger.info(`[agent] Registered device ${ensured.config.agentId}`);
-      }
-      scheduler.start(client, AGENT_VERSION, ensured.config.schedulerPaused ?? false);
-    })
-    .catch((err: unknown) => {
-      agentLogger.error("[agent] Failed to register saved config: " + String(err));
-    });
+  startSavedConfigWithRetry(storedConfig);
 } else {
   agentLogger.info("[agent] No saved config. POST http://127.0.0.1:9001/config with { apiKey, serverUrl } to start.");
 }

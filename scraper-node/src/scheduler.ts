@@ -72,6 +72,7 @@ export class Scheduler {
         this.realtimeWatcher = new RealtimeWatcher(
           res.supabaseUrl,
           res.anonKey,
+          res.agentDeviceId,
           client,
           () => { this._fireImmediateHeartbeat?.(); },
         );

@@ -59,6 +59,8 @@ export interface RealtimeTokenResponse {
   token: string;
   /** Unix epoch seconds when the token expires. */
   expiresAt: number;
+  /** Numeric server-side device row used to scope the bridge Realtime subscription. */
+  agentDeviceId: number;
   supabaseUrl: string;
   /** Supabase publishable anon key — used as the `createClient` second arg. */
   anonKey: string;

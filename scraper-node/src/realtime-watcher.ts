@@ -35,6 +35,10 @@ export function shouldTriggerCommandHint(
   return nextId !== lastSeenCommandId;
 }
 
+export function agentSessionRealtimeFilter(agentDeviceId: number): string {
+  return `agent_device_id=eq.${agentDeviceId}`;
+}
+
 /**
  * Maintains a Supabase Realtime subscription to `agent_sessions` so the agent
  * receives an instant push when a new command is enqueued (command envelope changes).
@@ -64,6 +68,7 @@ export class RealtimeWatcher {
   constructor(
     private readonly supabaseUrl: string,
     private readonly anonKey: string,
+    private readonly agentDeviceId: number,
     private readonly client: AgentApiClient,
     private readonly onCommandHint: () => void,
   ) {}
@@ -172,6 +177,7 @@ export class RealtimeWatcher {
           event: "UPDATE",
           schema: "public",
           table: "agent_sessions",
+          filter: agentSessionRealtimeFilter(this.agentDeviceId),
         },
         (payload) => {
           const nextRow = payload.new as AgentSessionCommandEnvelope;

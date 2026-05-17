@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldTriggerCommandHint } from "../src/realtime-watcher.js";
+import { agentSessionRealtimeFilter, shouldTriggerCommandHint } from "../src/realtime-watcher.js";
 
 describe("RealtimeWatcher - command envelope filtering", () => {
   it("fires when a new pending command envelope appears", () => {
@@ -40,5 +40,9 @@ describe("RealtimeWatcher - command envelope filtering", () => {
         "cmd-2",
       ),
     ).toBe(false);
+  });
+
+  it("scopes postgres_changes to the current agent session row", () => {
+    expect(agentSessionRealtimeFilter(11)).toBe("agent_device_id=eq.11");
   });
 });
