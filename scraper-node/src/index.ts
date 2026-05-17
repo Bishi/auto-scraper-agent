@@ -17,7 +17,7 @@ process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.7.1";
+const AGENT_VERSION = "0.7.2";
 const REGISTRATION_RETRY_BASE_MS = 5_000;
 const REGISTRATION_RETRY_MAX_MS = 5 * 60_000;
 
@@ -27,6 +27,7 @@ const REGISTRATION_RETRY_MAX_MS = 5 * 60_000;
 
 let client: AgentApiClient | null = null;
 let registrationRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let configStartGeneration = 0;
 const scheduler = new Scheduler((paused) => {
   updateConfig({ schedulerPaused: paused });
 });
@@ -93,35 +94,53 @@ function clearRegistrationRetry(): void {
   registrationRetryTimer = null;
 }
 
+function beginConfigStart(): number {
+  clearRegistrationRetry();
+  configStartGeneration += 1;
+  return configStartGeneration;
+}
+
+function isCurrentConfigStart(generation: number): boolean {
+  return generation === configStartGeneration;
+}
+
 function registrationRetryDelay(attempt: number): number {
   return Math.min(REGISTRATION_RETRY_BASE_MS * 2 ** attempt, REGISTRATION_RETRY_MAX_MS);
 }
 
-async function startConfiguredAgent(config: AgentConfig): Promise<void> {
+async function startConfiguredAgent(config: AgentConfig, generation: number): Promise<boolean> {
   const ensured = await ensureAgentClient(config);
+  if (!isCurrentConfigStart(generation)) {
+    agentLogger.info("[agent] Ignoring stale registration result after config changed");
+    return false;
+  }
   writeConfig(ensured.config);
   client = ensured.client;
   if (ensured.registered) {
     agentLogger.info(`[agent] Registered device ${ensured.config.agentId}`);
   }
+  scheduler.stop();
   scheduler.start(client, AGENT_VERSION, ensured.config.schedulerPaused ?? false);
+  return true;
 }
 
-function startSavedConfigWithRetry(config: AgentConfig, attempt = 0): void {
-  clearRegistrationRetry();
-  void startConfiguredAgent(config)
-    .then(() => {
+function startSavedConfigWithRetry(config: AgentConfig, attempt = 0, generation = beginConfigStart()): void {
+  void startConfiguredAgent(config, generation)
+    .then((started) => {
+      if (!started || !isCurrentConfigStart(generation)) return;
       clearRegistrationRetry();
     })
     .catch((err: unknown) => {
+      if (!isCurrentConfigStart(generation)) return;
       const delay = registrationRetryDelay(attempt);
       agentLogger.error(
         `[agent] Failed to register saved config: ${String(err)}; retrying in ${Math.round(delay / 1000)}s`,
       );
       registrationRetryTimer = setTimeout(() => {
+        if (!isCurrentConfigStart(generation)) return;
         const latest = readConfig();
         if (!latest) return;
-        startSavedConfigWithRetry(latest, attempt + 1);
+        startSavedConfigWithRetry(latest, attempt + 1, generation);
       }, delay);
     });
 }
@@ -238,9 +257,12 @@ const server = http.createServer((req, res) => {
         const nextConfig: AgentConfig = keepExistingCredentials
           ? { ...previous, apiKey: resolvedKey, serverUrl }
           : { apiKey: resolvedKey, serverUrl, schedulerPaused: previous?.schedulerPaused };
+        const generation = beginConfigStart();
         const ensured = await ensureAgentClient(nextConfig);
+        if (!isCurrentConfigStart(generation)) {
+          return sendJson(res, 409, { error: "Configuration superseded by a newer request" });
+        }
         writeConfig(ensured.config);
-        clearRegistrationRetry();
         client = ensured.client;
         scheduler.stop();
         scheduler.start(client, AGENT_VERSION, ensured.config.schedulerPaused ?? false);
