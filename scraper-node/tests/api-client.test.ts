@@ -1,6 +1,6 @@
 import { gunzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentApiClient, describeAgentApiError, isTransientAgentApiError } from "../src/api-client.js";
+import { AgentApiClient, describeAgentApiError, isTransientAgentApiError, registerAgent } from "../src/api-client.js";
 
 describe("describeAgentApiError", () => {
   it("normalizes fetch transport failures into a clearer server message", () => {
@@ -43,7 +43,7 @@ describe("AgentApiClient", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = new AgentApiClient("https://dashboard.example", "api-key");
+    const client = new AgentApiClient("https://dashboard.example", "agent-id", "agent-secret");
     const payload = {
       moduleName: "avto-net",
       jobPublicId: "abcdefghijkl",
@@ -58,10 +58,38 @@ describe("AgentApiClient", () => {
     expect(url).toBe("https://dashboard.example/api/agent/results");
     expect(init.method).toBe("POST");
     expect(init.headers).toMatchObject({
-      "X-API-Key": "api-key",
+      "X-Agent-Id": "agent-id",
+      "X-Agent-Secret": "agent-secret",
       "Content-Type": "application/json",
       "Content-Encoding": "gzip",
     });
     expect(gunzipSync(init.body as Buffer).toString("utf8")).toBe(JSON.stringify(payload));
+  });
+
+  it("registers with the profile API key bootstrap credential", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ agentId: "agent-id", agentSecret: "agent-secret" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      registerAgent("https://dashboard.example", "profile-key", {
+        hostname: "desk",
+        version: "1.0.0",
+        platform: "win32",
+      }),
+    ).resolves.toEqual({ agentId: "agent-id", agentSecret: "agent-secret" });
+
+    expect(fetchMock).toHaveBeenCalledWith("https://dashboard.example/api/agent/register", {
+      method: "POST",
+      headers: {
+        "X-API-Key": "profile-key",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ hostname: "desk", version: "1.0.0", platform: "win32" }),
+    });
   });
 });

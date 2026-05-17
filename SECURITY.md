@@ -18,7 +18,8 @@ This document explains how the auto-scraper agent handles credentials, what is (
 
 | Data | In binary? | Notes |
 |------|-----------|-------|
-| API key | ❌ No | Entered by user at first launch, stored locally |
+| Setup API key | ❌ No | Entered by user at first launch, stored locally for bootstrap/re-registration |
+| Agent ID + secret | ❌ No | Issued by the server after registration, stored locally |
 | Server URL | ❌ No | Entered by user at first launch, stored locally |
 | Database credentials | ❌ No | Never used by the agent |
 | Code-signing certificate | ❌ No | Injected during CI only, not baked into the binary |
@@ -39,17 +40,17 @@ The build pipeline does not inject any environment variables or secrets into the
 4. The user enters their **Server URL** and **API key** obtained from the dashboard (`Settings → API`).
 5. On submit, the Tauri shell calls `invoke("save_config", { serverUrl, apiKey })`.
 6. The Rust backend POSTs `{ serverUrl, apiKey }` to `http://127.0.0.1:9001/config` with the `X-Sidecar-Token` header.
-7. The sidecar writes the config to `~/.auto-scraper/agent.json` and starts the scheduler.
+7. The sidecar calls `POST /api/agent/register` with the setup API key, receives an agent ID and one-time agent secret, writes the config to `~/.auto-scraper/agent.json`, and starts the scheduler with `X-Agent-Id` / `X-Agent-Secret`.
 
 ### Subsequent launches
 
 1. The sidecar reads `~/.auto-scraper/agent.json` on startup.
-2. If valid, it reconnects to the server without prompting the user again.
+2. If the saved agent ID and secret still match the saved Server URL/API key tuple, it reconnects to the server without prompting the user again.
 3. The setup window is skipped; only the system tray icon appears.
 
 ### Updating credentials
 
-Open the setup window again (right-click the tray icon → **Settings**), enter new values, and save. The sidecar updates `agent.json` and restarts the scheduler.
+Open the setup window again (right-click the tray icon → **Settings**), enter new values, and save. If the Server URL or API key changed, the sidecar discards the saved agent ID/secret, registers a new device, updates `agent.json`, and restarts the scheduler.
 
 ---
 
@@ -57,7 +58,7 @@ Open the setup window again (right-click the tray icon → **Settings**), enter 
 
 | Location | Format | What's in it |
 |----------|--------|-------------|
-| `~/.auto-scraper/agent.json` | JSON | `serverUrl` and `apiKey` only |
+| `~/.auto-scraper/agent.json` | JSON | `serverUrl`, setup `apiKey`, `agentId`, and `agentSecret` |
 | Binary (`.exe`) | – | Nothing sensitive |
 | Windows Registry | – | Nothing (Tauri does not write credentials to the registry) |
 | Environment variables | – | Nothing (agent doesn't rely on env vars for secrets) |
@@ -102,9 +103,9 @@ The `release.yml` workflow:
 1. In the dashboard, go to **Settings → API** and generate a new key.
 2. On the agent machine, right-click the tray icon → **Settings**.
 3. Enter the new API key and save.
-4. The sidecar overwrites `agent.json` and reconnects immediately.
+4. The sidecar registers a new agent device, overwrites `agent.json`, and reconnects immediately.
 
-The old key is invalidated server-side; the agent will fail heartbeats until the new key is saved.
+The old setup key is invalidated server-side. Existing agent credentials issued before rotation are not used after saving the new key; lost agent secrets are recovered by registering a new device.
 
 ---
 

@@ -6,12 +6,20 @@ export interface AgentConfig {
   apiKey: string;
   serverUrl: string;
   schedulerPaused?: boolean;
+  agentId?: string;
+  agentSecret?: string;
+  credentialServerUrl?: string;
+  credentialApiKey?: string;
 }
 
 interface StoredAgentConfig {
   apiKey?: string;
   serverUrl?: string;
   schedulerPaused?: boolean;
+  agentId?: string;
+  agentSecret?: string;
+  credentialServerUrl?: string;
+  credentialApiKey?: string;
 }
 
 const CONFIG_DIR = join(homedir(), ".auto-scraper");
@@ -38,6 +46,10 @@ export function readConfig(): AgentConfig | null {
       apiKey: parsed.apiKey,
       serverUrl: parsed.serverUrl,
       schedulerPaused: parsed.schedulerPaused,
+      agentId: parsed.agentId,
+      agentSecret: parsed.agentSecret,
+      credentialServerUrl: parsed.credentialServerUrl,
+      credentialApiKey: parsed.credentialApiKey,
     };
   }
   return null;
@@ -50,4 +62,18 @@ export function updateConfig(patch: Partial<AgentConfig>): void {
 
 export function writeConfig(config: AgentConfig): void {
   updateConfig(config);
+}
+
+export function hasUsableAgentCredentials(config: AgentConfig): config is AgentConfig & {
+  agentId: string;
+  agentSecret: string;
+} {
+  return (
+    typeof config.agentId === "string" &&
+    config.agentId.length > 0 &&
+    typeof config.agentSecret === "string" &&
+    config.agentSecret.length > 0 &&
+    config.credentialServerUrl === config.serverUrl &&
+    config.credentialApiKey === config.apiKey
+  );
 }

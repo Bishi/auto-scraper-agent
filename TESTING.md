@@ -12,7 +12,7 @@ npm run dev
 
 Expected output:
 ```
-[agent] Auto-Scraper agent v0.4.x listening on http://127.0.0.1:9001
+[agent] Auto-Scraper agent v0.7.x listening on http://127.0.0.1:9001
 [agent] Loaded saved config: serverUrl=https://...
 ```
 
@@ -49,6 +49,14 @@ curl -X POST http://127.0.0.1:9001/config \
   -H "X-Sidecar-Token: $TOKEN" \
   -d '{"apiKey":"<your-api-key>","serverUrl":"http://localhost:3000"}'
 ```
+
+Expected sidecar log on first setup or after changing Server URL/API key:
+
+```
+[agent] Registered device <agentId>
+```
+
+Normal server calls after registration use `X-Agent-Id` and `X-Agent-Secret`; the profile API key is only the setup/bootstrap credential.
 
 ## 4. Trigger a scrape and watch for errors
 

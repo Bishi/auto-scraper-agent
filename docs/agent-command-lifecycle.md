@@ -7,6 +7,8 @@ The agent listens for commands in two ways:
 - Realtime gives it a fast nudge that "something changed"
 - heartbeat is the reliable check-in where the server and agent confirm what actually happened
 
+Runtime API calls use the registered device credential (`X-Agent-Id` and `X-Agent-Secret`). The dashboard profile API key is only used by setup to call `POST /api/agent/register`; if the saved Server URL or API key changes, the agent discards the old device credential and registers again.
+
 Those two things do different jobs.
 
 Realtime is only meant to wake the agent up quickly when the server queues a new command like:

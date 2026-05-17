@@ -40,6 +40,10 @@ describe("store", () => {
       apiKey: "as_live_123",
       serverUrl: "http://localhost:3000",
       schedulerPaused: undefined,
+      agentId: undefined,
+      agentSecret: undefined,
+      credentialServerUrl: undefined,
+      credentialApiKey: undefined,
     });
   });
 
@@ -100,5 +104,28 @@ describe("store", () => {
       }, null, 2),
       "utf8",
     );
+  });
+
+  it("recognizes agent credentials only for the matching setup tuple", async () => {
+    readFileSyncMock.mockReturnValue("{}");
+    const { hasUsableAgentCredentials } = await import("../src/store.js");
+
+    expect(hasUsableAgentCredentials({
+      apiKey: "key-1",
+      serverUrl: "https://server",
+      agentId: "agent-id",
+      agentSecret: "agent-secret",
+      credentialApiKey: "key-1",
+      credentialServerUrl: "https://server",
+    })).toBe(true);
+
+    expect(hasUsableAgentCredentials({
+      apiKey: "key-2",
+      serverUrl: "https://server",
+      agentId: "agent-id",
+      agentSecret: "agent-secret",
+      credentialApiKey: "key-1",
+      credentialServerUrl: "https://server",
+    })).toBe(false);
   });
 });

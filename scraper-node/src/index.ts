@@ -1,9 +1,9 @@
 import http from "node:http";
 import { rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
-import { readConfig, updateConfig, writeConfig } from "./store.js";
-import { AgentApiClient } from "./api-client.js";
+import { homedir, hostname } from "node:os";
+import { hasUsableAgentCredentials, readConfig, updateConfig, writeConfig, type AgentConfig } from "./store.js";
+import { AgentApiClient, registerAgent } from "./api-client.js";
 import { Scheduler } from "./scheduler.js";
 import { SIDECAR_TOKEN, isAuthorized } from "./auth.js";
 import { AGENT_LOG_BUFFER, SCRAPER_LOG_BUFFER, agentLogger } from "./logger.js";
@@ -17,7 +17,7 @@ process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.6.54";
+const AGENT_VERSION = "0.7.0";
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
@@ -50,6 +50,40 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
     });
     req.on("error", reject);
   });
+}
+
+async function ensureAgentClient(config: AgentConfig): Promise<{
+  client: AgentApiClient;
+  config: AgentConfig & { agentId: string; agentSecret: string };
+  registered: boolean;
+}> {
+  if (hasUsableAgentCredentials(config)) {
+    return {
+      client: new AgentApiClient(config.serverUrl, config.agentId, config.agentSecret),
+      config,
+      registered: false,
+    };
+  }
+
+  const registration = await registerAgent(config.serverUrl, config.apiKey, {
+    displayName: hostname(),
+    hostname: hostname(),
+    version: AGENT_VERSION,
+    platform: process.platform,
+  });
+  const nextConfig = {
+    ...config,
+    agentId: registration.agentId,
+    agentSecret: registration.agentSecret,
+    credentialServerUrl: config.serverUrl,
+    credentialApiKey: config.apiKey,
+  };
+  writeConfig(nextConfig);
+  return {
+    client: new AgentApiClient(nextConfig.serverUrl, nextConfig.agentId, nextConfig.agentSecret),
+    config: nextConfig,
+    registered: true,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -157,10 +191,18 @@ const server = http.createServer((req, res) => {
         }
 
         const previous = readConfig();
-        writeConfig({ apiKey: resolvedKey, serverUrl });
-        client = new AgentApiClient(serverUrl, resolvedKey);
+        const keepExistingCredentials =
+          previous?.serverUrl === serverUrl &&
+          previous.apiKey === resolvedKey &&
+          hasUsableAgentCredentials(previous);
+        const nextConfig: AgentConfig = keepExistingCredentials
+          ? { ...previous, apiKey: resolvedKey, serverUrl }
+          : { apiKey: resolvedKey, serverUrl, schedulerPaused: previous?.schedulerPaused };
+        writeConfig(nextConfig);
+        const ensured = await ensureAgentClient(nextConfig);
+        client = ensured.client;
         scheduler.stop();
-        scheduler.start(client, AGENT_VERSION, previous?.schedulerPaused ?? false);
+        scheduler.start(client, AGENT_VERSION, ensured.config.schedulerPaused ?? false);
 
         const keyTail =
           resolvedKey.length >= 4 ? resolvedKey.slice(-4) : "????";
@@ -180,6 +222,9 @@ const server = http.createServer((req, res) => {
                 ? `, apiKey updated (tail ...${keyTail})`
                 : `, apiKey unchanged (tail ...${keyTail})`),
           );
+        }
+        if (ensured.registered) {
+          agentLogger.info(`[agent] Registered device ${ensured.config.agentId}`);
         }
         return sendJson(res, 200, { ok: true });
       }
@@ -267,8 +312,17 @@ process.on("SIGTERM", () => shutdownFromSignal("SIGTERM"));
 const storedConfig = readConfig();
 if (storedConfig) {
   agentLogger.info(`[agent] Loaded saved config: serverUrl=${storedConfig.serverUrl}`);
-  client = new AgentApiClient(storedConfig.serverUrl, storedConfig.apiKey);
-  scheduler.start(client, AGENT_VERSION, storedConfig.schedulerPaused ?? false);
+  ensureAgentClient(storedConfig)
+    .then((ensured) => {
+      client = ensured.client;
+      if (ensured.registered) {
+        agentLogger.info(`[agent] Registered device ${ensured.config.agentId}`);
+      }
+      scheduler.start(client, AGENT_VERSION, ensured.config.schedulerPaused ?? false);
+    })
+    .catch((err: unknown) => {
+      agentLogger.error("[agent] Failed to register saved config: " + String(err));
+    });
 } else {
   agentLogger.info("[agent] No saved config. POST http://127.0.0.1:9001/config with { apiKey, serverUrl } to start.");
 }

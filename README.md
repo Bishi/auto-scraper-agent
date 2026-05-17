@@ -22,7 +22,7 @@ You are solely responsible for lawful use and for complying with each target sit
 
 ### First launch
 
-After installing, the agent window opens automatically to the **Settings** tab. Enter your Server URL and API key (from the dashboard under **Settings → API**) and click Save. The agent saves these to `~/.auto-scraper/agent.json` and starts the scheduler immediately. On all subsequent launches the window opens on the **Agent** tab instead — no re-entry needed.
+After installing, the agent window opens automatically to the **Settings** tab. Enter your Server URL and API key (from the dashboard under **Settings → API**) and click Save. The API key is used to register this machine once; the server returns an agent ID and agent secret for normal runtime calls. The agent saves these to `~/.auto-scraper/agent.json` and starts the scheduler immediately. On all subsequent launches the window opens on the **Agent** tab instead — no re-entry needed.
 
 ### Tray icon
 
@@ -74,7 +74,7 @@ Tauri shell (Rust)
                   └── scraper modules  (avto-net, bolha, proteini.si …)
 ```
 
-The Rust shell handles the tray icon, setup window (WebView2), and auto-update prompts. The Node.js sidecar does all the scraping and communicates with your Auto-Scraper server over HTTP. The two processes talk to each other on `127.0.0.1:9001`, authenticated with an ephemeral shared secret generated on each sidecar startup — any other local process attempting to call the sidecar is rejected with `401 Unauthorized`.
+The Rust shell handles the tray icon, setup window (WebView2), and auto-update prompts. The Node.js sidecar does all the scraping and communicates with your Auto-Scraper server over HTTP using its registered `X-Agent-Id` and `X-Agent-Secret`. The two local processes talk to each other on `127.0.0.1:9001`, authenticated with an ephemeral shared secret generated on each sidecar startup — any other local process attempting to call the sidecar is rejected with `401 Unauthorized`.
 
 Scraped data and heartbeats are sent to your server and surface across the dashboard — **Overview**, **Listings**, **Changes**, **Runs**, **Analytics**, and **Agent** tabs.
 
@@ -184,7 +184,7 @@ npm test
 
 ## Security
 
-Credentials are never baked into the binary. The API key and server URL are entered at first launch and saved only to `~/.auto-scraper/agent.json` on the local machine. The local sidecar HTTP server is protected by an ephemeral token so other processes on the machine cannot read your API key or trigger scrapes.
+Credentials are never baked into the binary. The setup API key and server URL are entered at first launch and saved only to `~/.auto-scraper/agent.json` on the local machine alongside the registered agent ID and secret. If the Server URL or API key changes, the saved agent credential is discarded and the machine registers again. The local sidecar HTTP server is protected by an ephemeral token so other processes on the machine cannot read credentials or trigger scrapes.
 
 See [SECURITY.md](SECURITY.md) for the full credential model, sidecar authentication, what is and isn't in the compiled binary, and how to report a vulnerability.
 

@@ -64,6 +64,18 @@ export interface RealtimeTokenResponse {
   anonKey: string;
 }
 
+export interface AgentRegistrationRequest {
+  displayName?: string;
+  hostname?: string;
+  version?: string;
+  platform?: string;
+}
+
+export interface AgentRegistrationResponse {
+  agentId: string;
+  agentSecret: string;
+}
+
 export interface HeartbeatResponse {
   ok: boolean;
   command?: string | null;
@@ -90,7 +102,8 @@ export interface HeartbeatOptions {
 export class AgentApiClient {
   constructor(
     private readonly serverUrl: string,
-    private readonly apiKey: string,
+    private readonly agentId: string,
+    private readonly agentSecret: string,
   ) {}
 
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -98,7 +111,8 @@ export class AgentApiClient {
     const res = await fetch(url, {
       ...options,
       headers: {
-        "X-API-Key": this.apiKey,
+        "X-Agent-Id": this.agentId,
+        "X-Agent-Secret": this.agentSecret,
         "Content-Type": "application/json",
         ...(options?.headers as Record<string, string> | undefined),
       },
@@ -176,4 +190,24 @@ export class AgentApiClient {
       body: JSON.stringify(body),
     });
   }
+}
+
+export async function registerAgent(
+  serverUrl: string,
+  apiKey: string,
+  body: AgentRegistrationRequest,
+): Promise<AgentRegistrationResponse> {
+  const res = await fetch(`${serverUrl}/api/agent/register`, {
+    method: "POST",
+    headers: {
+      "X-API-Key": apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API POST /api/agent/register -> ${res.status}: ${text}`);
+  }
+  return res.json() as Promise<AgentRegistrationResponse>;
 }
