@@ -16,7 +16,8 @@ function mockClient(): AgentApiClient {
     pushResults: vi.fn(),
     heartbeat: vi.fn().mockResolvedValue({ ok: true }),
     startJob: vi.fn().mockResolvedValue(undefined),
-    // Simulate a server that doesn't support Realtime; watcher falls back to polling silently.
+    getWsToken: vi.fn().mockRejectedValue(new Error("not supported")),
+    wsUrl: vi.fn().mockReturnValue("ws://localhost:3000/api/agent/ws?token=token"),
     getRealtimeToken: vi.fn().mockRejectedValue(new Error("not supported")),
   } as unknown as AgentApiClient;
 }
@@ -108,6 +109,19 @@ describe("Scheduler - heartbeat pause/resume", () => {
         schedulerPaused: true,
       }),
     );
+
+    s.stop();
+  });
+
+  it("starts the WebSocket client and does not start Supabase Realtime", async () => {
+    const client = mockClient();
+    const s = new Scheduler();
+
+    s.start(client as AgentApiClient, "1.0.0", true);
+
+    await vi.waitFor(() => expect(client.heartbeat).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(client.getWsToken).toHaveBeenCalledTimes(1));
+    expect(client.getRealtimeToken).not.toHaveBeenCalled();
 
     s.stop();
   });

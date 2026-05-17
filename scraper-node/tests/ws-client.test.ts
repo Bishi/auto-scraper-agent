@@ -48,14 +48,15 @@ describe("AgentWebSocketClient", () => {
     loggerMock.warn.mockClear();
   });
 
-  it("mints a token, connects, and logs the accepted connection", async () => {
+  it("mints a token, connects, logs, and heartbeats on connect", async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
+    const onCommandAvailable = vi.fn();
     const client = {
       getWsToken: vi.fn().mockResolvedValue({ token: "token", expiresAt: Math.floor(Date.now() / 1000) + 300 }),
       wsUrl: vi.fn().mockReturnValue("ws://localhost:3000/api/agent/ws?token=token"),
     } as unknown as AgentApiClient;
 
-    const wsClient = new AgentWebSocketClient(client);
+    const wsClient = new AgentWebSocketClient(client, onCommandAvailable);
     wsClient.start();
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
 
@@ -66,6 +67,43 @@ describe("AgentWebSocketClient", () => {
     expect(client.wsUrl).toHaveBeenCalledWith("token");
     expect(loggerMock.info).toHaveBeenCalledWith("[ws] Connected to agent WebSocket");
     expect(loggerMock.info).toHaveBeenCalledWith("[ws] Server accepted connection");
+    expect(onCommandAvailable).toHaveBeenCalledWith("connect");
+
+    wsClient.stop();
+  });
+
+  it("dedupes command.available messages and fires immediate heartbeat", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const onCommandAvailable = vi.fn();
+    const client = {
+      getWsToken: vi.fn().mockResolvedValue({ token: "token", expiresAt: Math.floor(Date.now() / 1000) + 300 }),
+      wsUrl: vi.fn().mockReturnValue("ws://localhost:3000/api/agent/ws?token=token"),
+    } as unknown as AgentApiClient;
+
+    const wsClient = new AgentWebSocketClient(client, onCommandAvailable);
+    wsClient.start();
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+
+    FakeWebSocket.instances[0]!.message(JSON.stringify({
+      type: "command.available",
+      commandId: "cmd-1",
+      command: "pause",
+    }));
+    FakeWebSocket.instances[0]!.message(JSON.stringify({
+      type: "command.available",
+      commandId: "cmd-1",
+      command: "pause",
+    }));
+    FakeWebSocket.instances[0]!.message(JSON.stringify({
+      type: "command.available",
+      commandId: "cmd-2",
+      command: "resume",
+    }));
+
+    expect(onCommandAvailable).toHaveBeenCalledTimes(2);
+    expect(onCommandAvailable).toHaveBeenNthCalledWith(1, "cmd-1");
+    expect(onCommandAvailable).toHaveBeenNthCalledWith(2, "cmd-2");
+    expect(loggerMock.info).toHaveBeenCalledWith("[ws] Command available - firing immediate heartbeat");
 
     wsClient.stop();
   });

@@ -15,8 +15,12 @@ export class AgentWebSocketClient {
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = true;
   private reconnectAttempt = 0;
+  private lastCommandHintId: string | null = null;
 
-  constructor(private readonly client: AgentApiClient) {}
+  constructor(
+    private readonly client: AgentApiClient,
+    private readonly onCommandAvailable: (commandId: string) => void = () => {},
+  ) {}
 
   start(): void {
     if (!this.stopped) return;
@@ -48,6 +52,7 @@ export class AgentWebSocketClient {
         this.reconnectAttempt = 0;
         agentLogger.info("[ws] Connected to agent WebSocket");
         this.scheduleTokenRefresh(expiresAt);
+        this.fireImmediateHeartbeat("connect");
       });
 
       socket.addEventListener("message", (event) => {
@@ -102,10 +107,27 @@ export class AgentWebSocketClient {
       const parsed = JSON.parse(data) as { type?: unknown };
       if (parsed.type === "connected") {
         agentLogger.info("[ws] Server accepted connection");
+        return;
+      }
+
+      if (parsed.type === "command.available") {
+        const commandId = (parsed as { commandId?: unknown }).commandId;
+        if (typeof commandId !== "string" || commandId.length === 0) return;
+        if (commandId === this.lastCommandHintId) return;
+        this.lastCommandHintId = commandId;
+        agentLogger.info("[ws] Command available - firing immediate heartbeat");
+        this.fireImmediateHeartbeat(commandId);
       }
     } catch {
       agentLogger.warn("[ws] Ignoring non-JSON message");
     }
   }
-}
 
+  private fireImmediateHeartbeat(commandId: string): void {
+    try {
+      this.onCommandAvailable(commandId);
+    } catch (err) {
+      agentLogger.warn(`[ws] Command wake callback failed: ${String(err)}`);
+    }
+  }
+}

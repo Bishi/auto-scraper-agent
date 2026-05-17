@@ -4,19 +4,18 @@
 
 The agent listens for commands in two ways:
 
-- Realtime gives it a fast nudge that "something changed"
+- WebSocket gives it a fast nudge that "a command is available"
 - heartbeat is the reliable check-in where the server and agent confirm what actually happened
 
-Phase 3 also opens a first-party WebSocket after startup. That socket is authenticated
-with a short-lived token from `GET /api/agent/ws-token`, logs connection lifecycle,
-and stays ready for the Phase 4 command wake path. In Phase 3 it does not wake
-commands; Supabase Realtime and heartbeat still do that job.
+Phase 4 does not start the Supabase Realtime watcher. The server may still write
+the old session projection for rollback builds, but this agent uses first-party
+WebSocket wake hints plus heartbeat.
 
 Runtime API calls use the registered device credential (`X-Agent-Id` and `X-Agent-Secret`). The dashboard profile API key is only used by setup to call `POST /api/agent/register`; if the saved Server URL or API key changes, the agent discards the old device credential and registers again.
 
 Those two things do different jobs.
 
-Realtime is only meant to wake the agent up quickly when the server queues a new command like:
+WebSocket is only meant to wake the agent up quickly when the server queues a new command like:
 
 - `scrape_now`
 - `stop_scrape`
@@ -40,8 +39,7 @@ That separation matters because the `agent_sessions` row changes for lots of rea
 
 In short:
 
-- Realtime is a fast hint
-- WebSocket is connected infrastructure only until Phase 4
+- WebSocket is a fast hint
 - heartbeat is the source of truth
 - job start and job results are the source of truth for scrape lifecycle
 
@@ -49,13 +47,25 @@ In short:
 
 ### Command delivery
 
-The server queues commands on `agent_sessions` using:
+The server queues commands in durable `agent_commands` rows and sends a
+`command.available` WebSocket hint containing:
+
+- `commandId`
+- `command`
+
+The hint is intentionally minimal. The next heartbeat fetches the authoritative
+command and payload.
+
+For rollback support, the server may still project commands on `agent_sessions`
+using:
 
 - `pending_command`
 - `pending_command_id`
 - optional `pending_command_payload`
 
-The agent Realtime watcher subscribes to `agent_sessions`, but it should only trigger an immediate heartbeat when the command envelope changes:
+Phase 4 agents do not subscribe to `agent_sessions`. Older rollback agents that
+use the Realtime watcher should only trigger an immediate heartbeat when the
+command envelope changes:
 
 - `pending_command`
 - `pending_command_id`
@@ -149,29 +159,36 @@ Current meanings:
 - `resume`: restore the countdown for future scheduled scrapes
 - `stop_scrape`: stop the active scrape after the current module completes
 
-### Realtime compatibility with AUT-175
+### WebSocket wake compatibility with AUT-208 Phase 4
 
-AUT-175 made command pickup faster by using Supabase Realtime.
+AUT-208 Phase 4 makes command pickup faster by using the first-party WebSocket.
 
-That remains correct as long as Realtime stays scoped to command-envelope changes only. If the agent starts waking up for lease refreshes or generic heartbeat writes, it can create noisy loops and duplicate work.
+That remains correct as long as WebSocket stays a wake hint only. If the agent
+starts trusting WS payloads as command truth, it can diverge from heartbeat ACK
+and durable `agent_commands` ordering.
 
 The intended model is:
 
-- Realtime notices a newly queued command
-- the agent sends an immediate heartbeat
+- the server commits a durable `agent_commands` row
+- the server sends `command.available` to the targeted connected agent
+- the agent dedupes the command id and sends an immediate heartbeat
 - the heartbeat returns the command
 - the scheduler applies it
 - the next heartbeat ACKs it
 
-### WebSocket compatibility with AUT-208 Phase 3
+### Supabase Realtime rollback compatibility
 
-The Phase 3 WebSocket client should:
+Supabase Realtime projection can still exist while Phase 4 soaks, but the Phase
+4 agent should not start the Realtime watcher. A rollback to the previous agent
+build can still use the session projection if needed.
+
+The Phase 4 WebSocket client should:
 
 - call `GET /api/agent/ws-token` with `X-Agent-Id` and `X-Agent-Secret`
 - connect to `/api/agent/ws?token=...`
-- log connect, close, token refresh, and reconnect events
+- log connect, close, token refresh, reconnect, and command wake events
 - refresh by reconnecting before the token expires
-- leave command wake handling untouched until Phase 4
+- heartbeat immediately on `command.available` and after reconnect
 
 ## What to watch for in testing
 
@@ -180,5 +197,5 @@ The Phase 3 WebSocket client should:
 - a healthy run should never flash `failed`
 - startup failure should mark the specific queued job failed
 - result-upload failure should fail the currently active job, not a random one
-- lease-only session updates should not cause a Realtime-triggered heartbeat
-- pause/resume should feel instant with Realtime but still finalize through heartbeat ACK
+- duplicate WebSocket command hints should not cause duplicate command execution
+- pause/resume should feel instant with WebSocket but still finalize through heartbeat ACK

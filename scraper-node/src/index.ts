@@ -17,7 +17,7 @@ process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.7.4";
+const AGENT_VERSION = "0.7.5";
 const REGISTRATION_RETRY_BASE_MS = 5_000;
 const REGISTRATION_RETRY_MAX_MS = 5 * 60_000;
 

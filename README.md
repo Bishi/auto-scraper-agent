@@ -74,7 +74,7 @@ Tauri shell (Rust)
                   └── scraper modules  (avto-net, bolha, proteini.si …)
 ```
 
-The Rust shell handles the tray icon, setup window (WebView2), and auto-update prompts. The Node.js sidecar does all the scraping and communicates with your Auto-Scraper server over HTTP using its registered `X-Agent-Id` and `X-Agent-Secret`. Phase 3 builds also open a first-party WebSocket with a short-lived token from `GET /api/agent/ws-token`; this is connection infrastructure only until WebSocket command wakeups are enabled. The two local processes talk to each other on `127.0.0.1:9001`, authenticated with an ephemeral shared secret generated on each sidecar startup — any other local process attempting to call the sidecar is rejected with `401 Unauthorized`.
+The Rust shell handles the tray icon, setup window (WebView2), and auto-update prompts. The Node.js sidecar does all the scraping and communicates with your Auto-Scraper server over HTTP using its registered `X-Agent-Id` and `X-Agent-Secret`. It also opens a first-party WebSocket with a short-lived token from `GET /api/agent/ws-token`; the socket carries command wake hints, while heartbeat remains the authoritative command fetch and ACK path. The two local processes talk to each other on `127.0.0.1:9001`, authenticated with an ephemeral shared secret generated on each sidecar startup — any other local process attempting to call the sidecar is rejected with `401 Unauthorized`.
 
 Scraped data and heartbeats are sent to your server and surface across the dashboard — **Overview**, **Listings**, **Changes**, **Runs**, **Analytics**, and **Agent** tabs.
 

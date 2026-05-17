@@ -6,7 +6,6 @@ import {
 import { runModule } from "./scraper.js";
 import { agentLogger, pushScraperLog } from "./logger.js";
 import type { DbConfig, LogEntry } from "./shared/types.js";
-import { RealtimeWatcher } from "./realtime-watcher.js";
 import { AgentWebSocketClient } from "./ws-client.js";
 
 const HEARTBEAT_INTERVAL_MS = 60_000;
@@ -22,7 +21,6 @@ export class Scheduler {
   private scrapeTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatAckTimer: ReturnType<typeof setTimeout> | null = null;
-  private realtimeWatcher: RealtimeWatcher | null = null;
   private wsClient: AgentWebSocketClient | null = null;
   private _fireImmediateHeartbeat: (() => void) | null = null;
   private _running = false;
@@ -65,29 +63,8 @@ export class Scheduler {
       void this.runCycle(client, true, "startup");
     }
 
-    this.wsClient = new AgentWebSocketClient(client);
+    this.wsClient = new AgentWebSocketClient(client, () => { this._fireImmediateHeartbeat?.(); });
     this.wsClient.start();
-
-    // Start Realtime subscription non-blocking - if the server doesn't support
-    // it (old deploy, missing env var) the watcher logs a warning and we fall
-    // back to the normal 60s heartbeat polling. Never block startup on this.
-    client.getRealtimeToken()
-      .then((res) => {
-        if (this.realtimeWatcher) return; // already started (shouldn't happen)
-        this.realtimeWatcher = new RealtimeWatcher(
-          res.supabaseUrl,
-          res.anonKey,
-          res.agentDeviceId,
-          client,
-          () => { this._fireImmediateHeartbeat?.(); },
-        );
-        // Seed the initial command ID so the first event doesn't fire a
-        // spurious heartbeat for a command that was already delivered.
-        void this.realtimeWatcher.start();
-      })
-      .catch((err: unknown) => {
-        agentLogger.warn(`[realtime] Unavailable - falling back to polling: ${String(err)}`);
-      });
   }
 
   stop(): void {
@@ -103,8 +80,6 @@ export class Scheduler {
     this._pendingAckCommandId = null;
     this.wsClient?.stop();
     this.wsClient = null;
-    this.realtimeWatcher?.stop();
-    this.realtimeWatcher = null;
     this._fireImmediateHeartbeat = null;
   }
 
@@ -268,10 +243,6 @@ export class Scheduler {
           }
           this.applyServerCommand(client, res.command, res.commandId, res.commandPayload ?? null);
 
-          // Keep the Realtime watcher's dedupe state in sync so it doesn't
-          // fire a spurious immediate heartbeat for a command we just picked up.
-          this.realtimeWatcher?.seedCommandId(res.commandId ?? null);
-
           // If this beat just set a pending ACK, fire a follow-up beat after a
           // short delay so the ACK reaches the server in ~500 ms rather than
           // waiting up to 60 s for the next scheduled heartbeat. This clears
@@ -300,8 +271,8 @@ export class Scheduler {
           agentLogger.error("[agent] Heartbeat failed: " + describeAgentApiError(err));
         });
     };
-    // Expose beat so RealtimeWatcher can fire an immediate heartbeat when a
-    // new pending_command_id is detected on the agent_sessions row.
+    // Expose beat so the WebSocket wake hint can fire an immediate heartbeat
+    // when the server reports that an authoritative command is available.
     this._fireImmediateHeartbeat = beat;
     beat(); // immediate first beat
     this.heartbeatTimer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
