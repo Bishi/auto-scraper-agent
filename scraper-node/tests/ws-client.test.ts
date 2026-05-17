@@ -22,7 +22,12 @@ class FakeWebSocket extends EventTarget {
   }
 
   close(code = 1000, reason = ""): void {
-    this.dispatchEvent(new CloseEvent("close", { code, reason }));
+    const event = new Event("close") as Event & { code: number; reason: string };
+    Object.defineProperties(event, {
+      code: { value: code },
+      reason: { value: reason },
+    });
+    this.dispatchEvent(event);
   }
 
   open(): void {
@@ -84,4 +89,3 @@ describe("AgentWebSocketClient", () => {
     wsClient.stop();
   });
 });
-
