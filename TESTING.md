@@ -183,7 +183,7 @@ Tagged `latest`, marked pre-release. Use for testing unreleased builds.
 
 ## What to test after installing
 
-See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the expected Realtime, WebSocket, heartbeat, and job-state contract behind these checks.
+See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the expected WebSocket, heartbeat, and job-state contract behind these checks.
 
 ### Persistence checks
 
@@ -207,7 +207,7 @@ See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the
 8. A module-scoped dashboard trigger runs exactly one module when the heartbeat command includes `commandPayload.module`, and the sidecar only receives one queued job for that scrape cycle
 9. Admin **Check for Updates** (fleet): same ack path as other commands — agent logs `Server command: check_update` and sets the update-check flag
 10. Agent logs show `[ws] Connected to agent WebSocket` and `[ws] Server accepted connection`
-11. Queueing a command logs `[ws] Command available - firing immediate heartbeat`; no `[realtime] Subscribed to agent_sessions` line appears in this build
+11. Queueing a command logs `[ws] Command available - firing immediate heartbeat`
 12. The immediate heartbeat logs `[agent] Heartbeat wake source: ws_command`
 13. Server logs for the heartbeat include `wakeSource: "ws_command"` or equivalent structured output
 14. "Check for Updates" in tray shows "up to date" dialog when on latest version

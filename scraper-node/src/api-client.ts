@@ -55,17 +55,6 @@ export interface PushResultsResponse {
   summary: DiffSummary;
 }
 
-export interface RealtimeTokenResponse {
-  token: string;
-  /** Unix epoch seconds when the token expires. */
-  expiresAt: number;
-  /** Numeric server-side device row used to scope the bridge Realtime subscription. */
-  agentDeviceId: number;
-  supabaseUrl: string;
-  /** Supabase publishable anon key — used as the `createClient` second arg. */
-  anonKey: string;
-}
-
 export interface WsTokenResponse {
   token: string;
   /** Unix epoch seconds when the token expires. */
@@ -138,10 +127,6 @@ export class AgentApiClient {
 
   async getConfig(): Promise<DbConfig> {
     return this.request<DbConfig>("/api/agent/config");
-  }
-
-  async getRealtimeToken(): Promise<RealtimeTokenResponse> {
-    return this.request<RealtimeTokenResponse>("/api/agent/realtime-token");
   }
 
   async getWsToken(): Promise<WsTokenResponse> {
