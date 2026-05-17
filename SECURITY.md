@@ -46,7 +46,8 @@ The build pipeline does not inject any environment variables or secrets into the
 
 1. The sidecar reads `~/.auto-scraper/agent.json` on startup.
 2. If the saved agent ID and secret still match the saved Server URL/API key tuple, it reconnects to the server without prompting the user again.
-3. The setup window is skipped; only the system tray icon appears.
+3. The sidecar mints short-lived WebSocket tokens from the server with those agent credentials when the Phase 3 WebSocket client connects or refreshes.
+4. The setup window is skipped; only the system tray icon appears.
 
 ### Updating credentials
 

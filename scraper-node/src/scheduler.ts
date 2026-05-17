@@ -7,6 +7,7 @@ import { runModule } from "./scraper.js";
 import { agentLogger, pushScraperLog } from "./logger.js";
 import type { DbConfig, LogEntry } from "./shared/types.js";
 import { RealtimeWatcher } from "./realtime-watcher.js";
+import { AgentWebSocketClient } from "./ws-client.js";
 
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
@@ -22,6 +23,7 @@ export class Scheduler {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatAckTimer: ReturnType<typeof setTimeout> | null = null;
   private realtimeWatcher: RealtimeWatcher | null = null;
+  private wsClient: AgentWebSocketClient | null = null;
   private _fireImmediateHeartbeat: (() => void) | null = null;
   private _running = false;
   private _paused = false;
@@ -63,6 +65,9 @@ export class Scheduler {
       void this.runCycle(client, true, "startup");
     }
 
+    this.wsClient = new AgentWebSocketClient(client);
+    this.wsClient.start();
+
     // Start Realtime subscription non-blocking - if the server doesn't support
     // it (old deploy, missing env var) the watcher logs a warning and we fall
     // back to the normal 60s heartbeat polling. Never block startup on this.
@@ -96,6 +101,8 @@ export class Scheduler {
     this._paused = false;
     this._started = false;
     this._pendingAckCommandId = null;
+    this.wsClient?.stop();
+    this.wsClient = null;
     this.realtimeWatcher?.stop();
     this.realtimeWatcher = null;
     this._fireImmediateHeartbeat = null;

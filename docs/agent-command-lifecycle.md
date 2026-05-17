@@ -7,6 +7,11 @@ The agent listens for commands in two ways:
 - Realtime gives it a fast nudge that "something changed"
 - heartbeat is the reliable check-in where the server and agent confirm what actually happened
 
+Phase 3 also opens a first-party WebSocket after startup. That socket is authenticated
+with a short-lived token from `GET /api/agent/ws-token`, logs connection lifecycle,
+and stays ready for the Phase 4 command wake path. In Phase 3 it does not wake
+commands; Supabase Realtime and heartbeat still do that job.
+
 Runtime API calls use the registered device credential (`X-Agent-Id` and `X-Agent-Secret`). The dashboard profile API key is only used by setup to call `POST /api/agent/register`; if the saved Server URL or API key changes, the agent discards the old device credential and registers again.
 
 Those two things do different jobs.
@@ -36,6 +41,7 @@ That separation matters because the `agent_sessions` row changes for lots of rea
 In short:
 
 - Realtime is a fast hint
+- WebSocket is connected infrastructure only until Phase 4
 - heartbeat is the source of truth
 - job start and job results are the source of truth for scrape lifecycle
 
@@ -156,6 +162,16 @@ The intended model is:
 - the heartbeat returns the command
 - the scheduler applies it
 - the next heartbeat ACKs it
+
+### WebSocket compatibility with AUT-208 Phase 3
+
+The Phase 3 WebSocket client should:
+
+- call `GET /api/agent/ws-token` with `X-Agent-Id` and `X-Agent-Secret`
+- connect to `/api/agent/ws?token=...`
+- log connect, close, token refresh, and reconnect events
+- refresh by reconnecting before the token expires
+- leave command wake handling untouched until Phase 4
 
 ## What to watch for in testing
 

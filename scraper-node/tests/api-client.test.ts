@@ -92,4 +92,32 @@ describe("AgentApiClient", () => {
       body: JSON.stringify({ hostname: "desk", version: "1.0.0", platform: "win32" }),
     });
   });
+
+  it("fetches a first-party WebSocket token with agent credentials", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ token: "ws-token", expiresAt: 123 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentApiClient("https://dashboard.example", "agent-id", "agent-secret");
+
+    await expect(client.getWsToken()).resolves.toEqual({ token: "ws-token", expiresAt: 123 });
+    expect(fetchMock).toHaveBeenCalledWith("https://dashboard.example/api/agent/ws-token", {
+      headers: {
+        "X-Agent-Id": "agent-id",
+        "X-Agent-Secret": "agent-secret",
+        "Content-Type": "application/json",
+      },
+    });
+  });
+
+  it("builds ws and wss URLs for the first-party command channel", () => {
+    expect(new AgentApiClient("https://dashboard.example", "agent-id", "agent-secret").wsUrl("token"))
+      .toBe("wss://dashboard.example/api/agent/ws?token=token");
+    expect(new AgentApiClient("http://localhost:3000", "agent-id", "agent-secret").wsUrl("token"))
+      .toBe("ws://localhost:3000/api/agent/ws?token=token");
+  });
 });

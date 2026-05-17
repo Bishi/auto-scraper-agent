@@ -46,7 +46,7 @@ The **Agent** tab on your server dashboard is the primary control surface. It sh
 
 | Control | What it does |
 |---------|-------------|
-| Run scrape | Triggers an immediate scrape. The button shows a spinner and locks until the agent picks up the command on its next heartbeat (~60 s), then unlocks once a job appears. |
+| Run scrape | Triggers an immediate scrape. The button shows a spinner and locks until the agent picks up the command through the current wake path or heartbeat fallback, then unlocks once a job appears. |
 | Stop scrape | Aborts the active scrape. The current module finishes first, then the run stops. |
 | Pause / Resume | Pauses or resumes the scheduler. The change propagates on the next heartbeat. |
 | Check for updates | Sends an update-check command through the server to the agent. The agent sets a badge in its window; no dialog pops up automatically. |
@@ -74,7 +74,7 @@ Tauri shell (Rust)
                   └── scraper modules  (avto-net, bolha, proteini.si …)
 ```
 
-The Rust shell handles the tray icon, setup window (WebView2), and auto-update prompts. The Node.js sidecar does all the scraping and communicates with your Auto-Scraper server over HTTP using its registered `X-Agent-Id` and `X-Agent-Secret`. The two local processes talk to each other on `127.0.0.1:9001`, authenticated with an ephemeral shared secret generated on each sidecar startup — any other local process attempting to call the sidecar is rejected with `401 Unauthorized`.
+The Rust shell handles the tray icon, setup window (WebView2), and auto-update prompts. The Node.js sidecar does all the scraping and communicates with your Auto-Scraper server over HTTP using its registered `X-Agent-Id` and `X-Agent-Secret`. Phase 3 builds also open a first-party WebSocket with a short-lived token from `GET /api/agent/ws-token`; this is connection infrastructure only until WebSocket command wakeups are enabled. The two local processes talk to each other on `127.0.0.1:9001`, authenticated with an ephemeral shared secret generated on each sidecar startup — any other local process attempting to call the sidecar is rejected with `401 Unauthorized`.
 
 Scraped data and heartbeats are sent to your server and surface across the dashboard — **Overview**, **Listings**, **Changes**, **Runs**, **Analytics**, and **Agent** tabs.
 
@@ -172,7 +172,7 @@ For a test build from a feature branch without tagging, go to **Actions → Rele
 ## Testing
 
 See [TESTING.md](TESTING.md) for the full manual and automated test checklist, including how to test the SEA binary, the auto-update flow, and what to verify after installing a new build.
-For the command, ACK, heartbeat, and Supabase Realtime contract specifically, see [docs/agent-command-lifecycle.md](docs/agent-command-lifecycle.md).
+For the command, ACK, heartbeat, Supabase Realtime, and first-party WebSocket contract specifically, see [docs/agent-command-lifecycle.md](docs/agent-command-lifecycle.md).
 
 ```bash
 # Unit tests (parser tests, runs in Node via Vitest)

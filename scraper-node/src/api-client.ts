@@ -66,6 +66,12 @@ export interface RealtimeTokenResponse {
   anonKey: string;
 }
 
+export interface WsTokenResponse {
+  token: string;
+  /** Unix epoch seconds when the token expires. */
+  expiresAt: number;
+}
+
 export interface AgentRegistrationRequest {
   displayName?: string;
   hostname?: string;
@@ -135,6 +141,19 @@ export class AgentApiClient {
 
   async getRealtimeToken(): Promise<RealtimeTokenResponse> {
     return this.request<RealtimeTokenResponse>("/api/agent/realtime-token");
+  }
+
+  async getWsToken(): Promise<WsTokenResponse> {
+    return this.request<WsTokenResponse>("/api/agent/ws-token");
+  }
+
+  wsUrl(token: string): string {
+    const url = new URL(this.serverUrl);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.pathname = "/api/agent/ws";
+    url.search = "";
+    url.searchParams.set("token", token);
+    return url.toString();
   }
 
   async getSchedule(moduleName?: string): Promise<Schedule> {
