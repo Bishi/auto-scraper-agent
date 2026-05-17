@@ -105,6 +105,7 @@ export interface HeartbeatOptions {
   schedulerPaused: boolean;
   activeJobPublicId?: string | null;
   ackCommandId?: string;
+  wakeSource?: "startup" | "interval" | "ws_connect" | "ws_command" | "ack_followup" | "failure";
 }
 
 export class AgentApiClient {
@@ -206,6 +207,7 @@ export class AgentApiClient {
     if (opts?.failureJobPublicId !== undefined) body.failureJobPublicId = opts.failureJobPublicId;
     if ("activeJobPublicId" in (opts ?? {})) body.activeJobPublicId = opts?.activeJobPublicId ?? null;
     if (opts?.ackCommandId) body.ackCommandId = opts.ackCommandId;
+    if (opts?.wakeSource) body.wakeSource = opts.wakeSource;
     return this.request<HeartbeatResponse>("/api/agent/heartbeat", {
       method: "POST",
       body: JSON.stringify(body),

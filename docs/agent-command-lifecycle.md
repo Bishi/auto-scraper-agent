@@ -189,6 +189,7 @@ The Phase 4 WebSocket client should:
 - log connect, close, token refresh, reconnect, and command wake events
 - refresh by reconnecting before the token expires
 - heartbeat immediately on `command.available` and after reconnect
+- include heartbeat `wakeSource` diagnostics for startup, WS connect, WS command wake, ACK follow-up, and failure reporting during Phase 5 soak
 
 ## What to watch for in testing
 
@@ -199,3 +200,4 @@ The Phase 4 WebSocket client should:
 - result-upload failure should fail the currently active job, not a random one
 - duplicate WebSocket command hints should not cause duplicate command execution
 - pause/resume should feel instant with WebSocket but still finalize through heartbeat ACK
+- Admin Fleet should show whether the agent has an active WS connection while Admin Overview tracks wake sent/missed and command latency

@@ -12,6 +12,7 @@ const HEARTBEAT_INTERVAL_MS = 60_000;
 
 type Trigger = "startup" | "schedule" | "manual" | "server" | "resume";
 type ScrapeScope = { module: string } | null;
+type HeartbeatWakeSource = "startup" | "interval" | "ws_connect" | "ws_command" | "ack_followup" | "failure";
 
 export class Scheduler {
   constructor(
@@ -22,7 +23,7 @@ export class Scheduler {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatAckTimer: ReturnType<typeof setTimeout> | null = null;
   private wsClient: AgentWebSocketClient | null = null;
-  private _fireImmediateHeartbeat: (() => void) | null = null;
+  private _fireImmediateHeartbeat: ((wakeSource?: HeartbeatWakeSource) => void) | null = null;
   private _running = false;
   private _paused = false;
   private _stopRequested = false;
@@ -63,7 +64,9 @@ export class Scheduler {
       void this.runCycle(client, true, "startup");
     }
 
-    this.wsClient = new AgentWebSocketClient(client, () => { this._fireImmediateHeartbeat?.(); });
+    this.wsClient = new AgentWebSocketClient(client, (commandId) => {
+      this._fireImmediateHeartbeat?.(commandId === "connect" ? "ws_connect" : "ws_command");
+    });
     this.wsClient.start();
   }
 
@@ -143,12 +146,14 @@ export class Scheduler {
   private currentHeartbeatOptions(extra: {
     failureMsg?: string;
     failureJobPublicId?: string;
+    wakeSource?: HeartbeatWakeSource;
   } = {}): {
     schedulerPaused: boolean;
     activeJobPublicId: string | null;
     ackCommandId?: string;
     failureMsg?: string;
     failureJobPublicId?: string;
+    wakeSource?: HeartbeatWakeSource;
   } {
     return {
       schedulerPaused: this._paused,
@@ -156,6 +161,7 @@ export class Scheduler {
       ...(this._pendingAckCommandId ? { ackCommandId: this._pendingAckCommandId } : {}),
       ...(extra.failureMsg ? { failureMsg: extra.failureMsg } : {}),
       ...(extra.failureJobPublicId !== undefined ? { failureJobPublicId: extra.failureJobPublicId } : {}),
+      ...(extra.wakeSource ? { wakeSource: extra.wakeSource } : {}),
     };
   }
 
@@ -224,10 +230,13 @@ export class Scheduler {
   }
 
   private startHeartbeat(client: AgentApiClient): void {
-    const beat = (): void => {
+    const beat = (wakeSource: HeartbeatWakeSource = "interval"): void => {
       if (!this._started) return;
+      if (wakeSource !== "interval") {
+        agentLogger.info({ wakeSource }, `[agent] Heartbeat wake source: ${wakeSource}`);
+      }
       client
-        .heartbeat(this._version, process.platform, this.currentHeartbeatOptions())
+        .heartbeat(this._version, process.platform, this.currentHeartbeatOptions({ wakeSource }))
         .then((res) => {
           if (!this._started) return;
           if (this.transientHeartbeatFailures >= 3) {
@@ -251,7 +260,7 @@ export class Scheduler {
             if (this.heartbeatAckTimer) clearTimeout(this.heartbeatAckTimer);
             this.heartbeatAckTimer = setTimeout(() => {
               this.heartbeatAckTimer = null;
-              beat();
+              beat("ack_followup");
             }, 500);
           }
         })
@@ -274,7 +283,7 @@ export class Scheduler {
     // Expose beat so the WebSocket wake hint can fire an immediate heartbeat
     // when the server reports that an authoritative command is available.
     this._fireImmediateHeartbeat = beat;
-    beat(); // immediate first beat
+    beat("startup"); // immediate first beat
     this.heartbeatTimer = setInterval(beat, HEARTBEAT_INTERVAL_MS);
   }
 
@@ -310,7 +319,7 @@ export class Scheduler {
         Promise.resolve(client.heartbeat(
           this._version,
           process.platform,
-          this.currentHeartbeatOptions({ failureMsg: errMsg }),
+          this.currentHeartbeatOptions({ failureMsg: errMsg, wakeSource: "failure" }),
         )).catch(() => {});
       }
     } finally {
@@ -402,6 +411,7 @@ export class Scheduler {
             this.currentHeartbeatOptions({
               failureMsg: `Failed to start job ${jobPublicId}: ${errMsg}`,
               failureJobPublicId: jobPublicId,
+              wakeSource: "failure",
             }),
           )).catch(() => {});
           this._activeJobPublicId = null;
@@ -457,6 +467,7 @@ export class Scheduler {
             this.currentHeartbeatOptions({
               failureMsg: errMsg,
               failureJobPublicId: jobPublicId,
+              wakeSource: "failure",
             }),
           )).catch(() => {});
           this._activeJobPublicId = null;
@@ -477,6 +488,7 @@ export class Scheduler {
           this.currentHeartbeatOptions({
             failureMsg: errMsg,
             ...(jobPublicId !== undefined ? { failureJobPublicId: jobPublicId } : {}),
+            wakeSource: "failure",
           }),
         )).catch(() => {});
         this._activeJobPublicId = null;

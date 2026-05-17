@@ -208,7 +208,17 @@ See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the
 9. Admin **Check for Updates** (fleet): same ack path as other commands — agent logs `Server command: check_update` and sets the update-check flag
 10. Agent logs show `[ws] Connected to agent WebSocket` and `[ws] Server accepted connection`
 11. Queueing a command logs `[ws] Command available - firing immediate heartbeat`; no `[realtime] Subscribed to agent_sessions` line appears in this build
-12. "Check for Updates" in tray shows "up to date" dialog when on latest version
+12. The immediate heartbeat logs `[agent] Heartbeat wake source: ws_command`
+13. Server logs for the heartbeat include `wakeSource: "ws_command"` or equivalent structured output
+14. "Check for Updates" in tray shows "up to date" dialog when on latest version
+
+### Phase 5 soak checks
+
+1. Complete at least 30 command cycles across full scrape, module scrape, pause, resume, stop, and check_update
+2. Include restart, sleep/wake or network drop/reconnect, token refresh, and WS-blocked fallback
+3. Confirm no duplicate command execution
+4. Confirm no command missed when WS is healthy
+5. In a two-agent profile, confirm command wake and execution stay on the selected target agent
 
 ### Startup splash and schedule-state checks
 
