@@ -126,4 +126,30 @@ describe("AgentWebSocketClient", () => {
     expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(2);
     wsClient.stop();
   });
+
+  it("ignores stale close events from a previous socket", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const client = {
+      getWsToken: vi.fn().mockResolvedValue({ token: "token", expiresAt: Math.floor(Date.now() / 1000) + 300 }),
+      wsUrl: vi.fn().mockReturnValue("ws://localhost:3000/api/agent/ws?token=token"),
+    } as unknown as AgentApiClient;
+
+    const wsClient = new AgentWebSocketClient(client);
+    wsClient.start();
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+
+    const oldSocket = FakeWebSocket.instances[0]!;
+    oldSocket.open();
+    oldSocket.close(1006, "network");
+    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(2));
+
+    FakeWebSocket.instances[1]!.open();
+    oldSocket.close(1000, "late close");
+    await vi.advanceTimersByTimeAsync(35_000);
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    wsClient.stop();
+  });
 });

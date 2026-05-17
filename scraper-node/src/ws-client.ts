@@ -60,7 +60,8 @@ export class AgentWebSocketClient {
       });
 
       socket.addEventListener("close", (event) => {
-        if (this.socket === socket) this.socket = null;
+        if (this.socket !== socket) return;
+        this.socket = null;
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
         this.refreshTimer = null;
         agentLogger.warn(`[ws] Closed code=${event.code} reason=${event.reason || "none"}`);
