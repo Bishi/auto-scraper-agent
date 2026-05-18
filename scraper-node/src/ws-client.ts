@@ -4,6 +4,8 @@ import { agentLogger } from "./logger.js";
 const MIN_RECONNECT_MS = 1_000;
 const MAX_RECONNECT_MS = 30_000;
 const TOKEN_REFRESH_SKEW_MS = 60_000;
+const TOKEN_REFRESH_CLOSE_CODE = 4001;
+const TOKEN_REFRESH_CLOSE_REASON = "token refresh";
 
 function jitter(ms: number): number {
   return Math.round(ms * (0.8 + Math.random() * 0.4));
@@ -64,7 +66,12 @@ export class AgentWebSocketClient {
         this.socket = null;
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
         this.refreshTimer = null;
-        agentLogger.warn(`[ws] Closed code=${event.code} reason=${event.reason || "none"}`);
+        const closeMessage = `[ws] Closed code=${event.code} reason=${event.reason || "none"}`;
+        if (event.code === TOKEN_REFRESH_CLOSE_CODE && event.reason === TOKEN_REFRESH_CLOSE_REASON) {
+          agentLogger.info(closeMessage);
+        } else {
+          agentLogger.warn(closeMessage);
+        }
         this.scheduleReconnect();
       });
 
@@ -86,7 +93,7 @@ export class AgentWebSocketClient {
       this.refreshTimer = null;
       if (this.stopped) return;
       agentLogger.info("[ws] Refreshing WebSocket token");
-      this.socket?.close(4001, "token refresh");
+      this.socket?.close(TOKEN_REFRESH_CLOSE_CODE, TOKEN_REFRESH_CLOSE_REASON);
       this.scheduleReconnect(0);
     }, delay);
   }
