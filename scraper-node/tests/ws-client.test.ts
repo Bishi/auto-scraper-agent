@@ -127,12 +127,48 @@ describe("AgentWebSocketClient", () => {
     wsClient.stop();
   });
 
-  it("logs planned token-refresh closes at info level", async () => {
+  it("keeps successful planned token refresh silent", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("WebSocket", FakeWebSocket);
+    const onCommandAvailable = vi.fn();
     const client = {
       getWsToken: vi.fn().mockResolvedValue({ token: "token", expiresAt: Math.floor(Date.now() / 1000) + 300 }),
       wsUrl: vi.fn().mockReturnValue("ws://localhost:3000/api/agent/ws?token=token"),
+    } as unknown as AgentApiClient;
+
+    const wsClient = new AgentWebSocketClient(client, onCommandAvailable);
+    wsClient.start();
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+
+    FakeWebSocket.instances[0]!.open();
+    loggerMock.info.mockClear();
+    onCommandAvailable.mockClear();
+    await vi.advanceTimersByTimeAsync(240_000);
+    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    FakeWebSocket.instances[1]!.open();
+    FakeWebSocket.instances[1]!.message(JSON.stringify({ type: "connected" }));
+
+    expect(loggerMock.info).not.toHaveBeenCalledWith("[ws] Refreshing WebSocket token");
+    expect(loggerMock.info).not.toHaveBeenCalledWith("[ws] Closed code=4001 reason=token refresh");
+    expect(loggerMock.info).not.toHaveBeenCalledWith("[ws] Connected to agent WebSocket");
+    expect(loggerMock.info).not.toHaveBeenCalledWith("[ws] Server accepted connection");
+    expect(loggerMock.warn).not.toHaveBeenCalledWith("[ws] Closed code=4001 reason=token refresh");
+    expect(onCommandAvailable).not.toHaveBeenCalled();
+    wsClient.stop();
+  });
+
+  it("warns when token refresh reconnect fails and logs recovery", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const client = {
+      getWsToken: vi.fn()
+        .mockResolvedValueOnce({ token: "token-1", expiresAt: Math.floor(Date.now() / 1000) + 300 })
+        .mockRejectedValueOnce(new Error("rate limited"))
+        .mockResolvedValueOnce({ token: "token-2", expiresAt: Math.floor(Date.now() / 1000) + 300 }),
+      wsUrl: vi.fn()
+        .mockReturnValueOnce("ws://localhost:3000/api/agent/ws?token=token-1")
+        .mockReturnValueOnce("ws://localhost:3000/api/agent/ws?token=token-2"),
     } as unknown as AgentApiClient;
 
     const wsClient = new AgentWebSocketClient(client);
@@ -140,11 +176,20 @@ describe("AgentWebSocketClient", () => {
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
 
     FakeWebSocket.instances[0]!.open();
+    loggerMock.info.mockClear();
     await vi.advanceTimersByTimeAsync(240_000);
+    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.waitFor(() => {
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        "[ws] Token refresh reconnect failed: Error: rate limited",
+      );
+    });
 
-    expect(loggerMock.info).toHaveBeenCalledWith("[ws] Refreshing WebSocket token");
-    expect(loggerMock.info).toHaveBeenCalledWith("[ws] Closed code=4001 reason=token refresh");
-    expect(loggerMock.warn).not.toHaveBeenCalledWith("[ws] Closed code=4001 reason=token refresh");
+    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    FakeWebSocket.instances[1]!.open();
+
+    expect(loggerMock.info).toHaveBeenCalledWith("[ws] Reconnected after token refresh failure");
     wsClient.stop();
   });
 

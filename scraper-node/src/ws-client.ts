@@ -18,6 +18,9 @@ export class AgentWebSocketClient {
   private stopped = true;
   private reconnectAttempt = 0;
   private lastCommandHintId: string | null = null;
+  private tokenRefreshInProgress = false;
+  private suppressNextConnectedMessage = false;
+  private logNextReconnectSuccess = false;
 
   constructor(
     private readonly client: AgentApiClient,
@@ -52,9 +55,23 @@ export class AgentWebSocketClient {
 
       socket.addEventListener("open", () => {
         this.reconnectAttempt = 0;
-        agentLogger.info("[ws] Connected to agent WebSocket");
         this.scheduleTokenRefresh(expiresAt);
-        this.fireImmediateHeartbeat("connect");
+        if (this.tokenRefreshInProgress) {
+          this.tokenRefreshInProgress = false;
+          this.suppressNextConnectedMessage = true;
+          if (this.logNextReconnectSuccess) {
+            this.logNextReconnectSuccess = false;
+            agentLogger.info("[ws] Reconnected after token refresh failure");
+          }
+        } else {
+          if (this.logNextReconnectSuccess) {
+            this.logNextReconnectSuccess = false;
+            agentLogger.info("[ws] Reconnected after token refresh failure");
+          } else {
+            agentLogger.info("[ws] Connected to agent WebSocket");
+          }
+          this.fireImmediateHeartbeat("connect");
+        }
       });
 
       socket.addEventListener("message", (event) => {
@@ -68,9 +85,11 @@ export class AgentWebSocketClient {
         this.refreshTimer = null;
         const closeMessage = `[ws] Closed code=${event.code} reason=${event.reason || "none"}`;
         if (event.code === TOKEN_REFRESH_CLOSE_CODE && event.reason === TOKEN_REFRESH_CLOSE_REASON) {
-          agentLogger.info(closeMessage);
+          // Expected token rotation path; logged once when the replacement socket opens.
         } else {
           agentLogger.warn(closeMessage);
+          this.tokenRefreshInProgress = false;
+          this.suppressNextConnectedMessage = false;
         }
         this.scheduleReconnect();
       });
@@ -80,7 +99,15 @@ export class AgentWebSocketClient {
       });
     } catch (err) {
       if (!this.stopped) {
-        agentLogger.warn(`[ws] Failed to connect: ${String(err)}`);
+        const wasRefreshing = this.tokenRefreshInProgress;
+        this.tokenRefreshInProgress = false;
+        this.suppressNextConnectedMessage = false;
+        if (wasRefreshing) {
+          this.logNextReconnectSuccess = true;
+          agentLogger.warn(`[ws] Token refresh reconnect failed: ${String(err)}`);
+        } else {
+          agentLogger.warn(`[ws] Failed to connect: ${String(err)}`);
+        }
         this.scheduleReconnect();
       }
     }
@@ -92,7 +119,7 @@ export class AgentWebSocketClient {
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
       if (this.stopped) return;
-      agentLogger.info("[ws] Refreshing WebSocket token");
+      this.tokenRefreshInProgress = true;
       this.socket?.close(TOKEN_REFRESH_CLOSE_CODE, TOKEN_REFRESH_CLOSE_REASON);
       this.scheduleReconnect(0);
     }, delay);
@@ -114,6 +141,10 @@ export class AgentWebSocketClient {
     try {
       const parsed = JSON.parse(data) as { type?: unknown };
       if (parsed.type === "connected") {
+        if (this.suppressNextConnectedMessage) {
+          this.suppressNextConnectedMessage = false;
+          return;
+        }
         agentLogger.info("[ws] Server accepted connection");
         return;
       }
