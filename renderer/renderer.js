@@ -470,6 +470,14 @@ function formatLogTime(ts) {
   });
 }
 
+function formatLogDate(ts) {
+  const d = new Date(ts);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function formatLogLevel(level) {
   return level === "error" ? "ERR" : level === "warn" ? "WRN" : "INF";
 }
@@ -505,6 +513,28 @@ function createLogEntry(log) {
   return entry;
 }
 
+function createLogDateDivider(date) {
+  const divider = document.createElement("div");
+  divider.className = "log-date";
+  divider.dataset.date = date;
+  divider.textContent = date;
+  return divider;
+}
+
+function createLogRows(logs) {
+  const rows = [];
+  let lastDate = "";
+  for (const log of logs) {
+    const date = formatLogDate(log.ts);
+    if (date !== lastDate) {
+      rows.push(createLogDateDivider(date));
+      lastDate = date;
+    }
+    rows.push(createLogEntry(log));
+  }
+  return rows;
+}
+
 function renderLogList(box, logs, emptyMessage, getLastKey, setLastKey, shouldAutoScroll) {
   if (logs.length === 0) {
     setLastKey("");
@@ -517,7 +547,7 @@ function renderLogList(box, logs, emptyMessage, getLastKey, setLastKey, shouldAu
   if (newKey === getLastKey()) return;
   setLastKey(newKey);
 
-  box.replaceChildren(...logs.map(createLogEntry));
+  box.replaceChildren(...createLogRows(logs));
   if (shouldAutoScroll()) box.scrollTop = box.scrollHeight;
 }
 
@@ -526,9 +556,13 @@ function getSelectedLogLines(box) {
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return [];
 
   const ranges = Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index));
-  return Array.from(box.querySelectorAll(".log-entry"))
+  return Array.from(box.querySelectorAll(".log-date,.log-entry"))
     .filter((entry) => ranges.some((range) => range.intersectsNode(entry)))
-    .map((entry) => `${entry.dataset.ts} ${entry.dataset.level} ${entry.dataset.msg}`);
+    .map((entry) => {
+      if (entry.classList.contains("log-date")) return entry.dataset.date || "";
+      return `${entry.dataset.ts} ${entry.dataset.level} ${entry.dataset.msg}`;
+    })
+    .filter(Boolean);
 }
 
 function attachLogCopyNormalizer(box) {
@@ -541,7 +575,7 @@ function attachLogCopyNormalizer(box) {
 }
 
 function selectLogBoxEntries(box) {
-  const entries = box.querySelectorAll(".log-entry");
+  const entries = box.querySelectorAll(".log-date,.log-entry");
   if (entries.length === 0) return;
 
   const range = document.createRange();
