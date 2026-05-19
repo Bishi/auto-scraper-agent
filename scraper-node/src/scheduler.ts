@@ -5,6 +5,7 @@ import {
 } from "./api-client.js";
 import { runModule } from "./scraper.js";
 import { agentLogger, pushScraperLog } from "./logger.js";
+import { centralLogUploadDisabledForSession, flushCentralLogs } from "./central-log-queue.js";
 import type { DbConfig, LogEntry } from "./shared/types.js";
 import { AgentWebSocketClient } from "./ws-client.js";
 
@@ -176,6 +177,17 @@ export class Scheduler {
     commandPayload: ScrapeScope = null,
   ): void {
     if (!command || !commandId || commandId === this._pendingAckCommandId) return;
+
+    if (command === "flush_logs") {
+      if (centralLogUploadDisabledForSession()) {
+        agentLogger.warn("[agent] Server command: flush_logs skipped because central log upload is disabled for this session");
+      } else {
+        agentLogger.info("[agent] Server command: flush_logs");
+        void flushCentralLogs();
+      }
+      this.stageAck(commandId);
+      return;
+    }
 
     if (command === "scrape_now") {
       if (!this._running) {

@@ -247,6 +247,10 @@ export function centralLogQueueSize(): number {
   return entries.length;
 }
 
+export function centralLogUploadDisabledForSession(): boolean {
+  return disabledForSession;
+}
+
 export function resetCentralLogQueueForTests(): void {
   entries = [];
   client = null;

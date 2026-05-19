@@ -3,10 +3,19 @@ import { Scheduler } from "../src/scheduler.js";
 import type { AgentApiClient, HeartbeatOptions } from "../src/api-client.js";
 import { runModule } from "../src/scraper.js";
 import { agentLogger, SCRAPER_LOG_BUFFER } from "../src/logger.js";
+import { flushCentralLogs } from "../src/central-log-queue.js";
 
 vi.mock("../src/scraper.js", () => ({
   runModule: vi.fn(),
 }));
+
+vi.mock("../src/central-log-queue.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/central-log-queue.js")>();
+  return {
+    ...actual,
+    flushCentralLogs: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 function mockClient(): AgentApiClient {
   return {
@@ -22,6 +31,11 @@ function mockClient(): AgentApiClient {
 }
 
 const runModuleMock = vi.mocked(runModule);
+const flushCentralLogsMock = vi.mocked(flushCentralLogs);
+
+beforeEach(() => {
+  flushCentralLogsMock.mockClear();
+});
 
 describe("Scheduler - state machine", () => {
   it("initial state: not running, not paused, no next run", () => {
@@ -152,6 +166,43 @@ describe("Scheduler - heartbeat pause/resume", () => {
       }),
     );
     s.stop();
+  });
+
+  it("flushes central logs and ACKs a flush_logs server command", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = mockClient();
+      const hb = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          command: "flush_logs",
+          commandId: "flush-command-id",
+        })
+        .mockResolvedValue({ ok: true });
+      (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+
+      const s = new Scheduler();
+      s.start(client as AgentApiClient, "1.0.0", true);
+
+      await vi.waitFor(() => expect(flushCentralLogsMock).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(600);
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(2));
+      expect(hb).toHaveBeenNthCalledWith(
+        2,
+        "1.0.0",
+        expect.any(String),
+        expect.objectContaining({
+          ackCommandId: "flush-command-id",
+          wakeSource: "ack_followup",
+        }),
+      );
+
+      s.stop();
+    } finally {
+      vi.useRealTimers();
+      flushCentralLogsMock.mockClear();
+    }
   });
 
   it("applies a module-scoped scrape_now server command to exactly one module", async () => {
