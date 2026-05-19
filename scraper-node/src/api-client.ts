@@ -1,5 +1,6 @@
 import { gzipSync } from "node:zlib";
 import type { Listing, LogEntry, DbConfig, DiffSummary, DebugSnapshotData } from "./shared/types.js";
+import type { CentralLogEntry } from "./central-log-queue.js";
 
 function stringifyAgentApiError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -53,6 +54,24 @@ export interface PushResultsParams {
 export interface PushResultsResponse {
   ok: boolean;
   summary: DiffSummary;
+}
+
+export interface PushLogsResponse {
+  ok: boolean;
+  accepted: number;
+  duplicates: number;
+  invalid: number;
+}
+
+export class AgentLogUploadError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryAfterMs: number | null = null,
+  ) {
+    super(message);
+    this.name = "AgentLogUploadError";
+  }
 }
 
 export interface WsTokenResponse {
@@ -172,6 +191,32 @@ export class AgentApiClient {
       headers: { "Content-Encoding": "gzip" },
       body: compressedBody,
     });
+  }
+
+  async pushLogs(entries: CentralLogEntry[]): Promise<PushLogsResponse> {
+    const compressedBody = gzipSync(JSON.stringify({ entries }));
+    const path = "/api/agent/logs";
+    const res = await fetch(`${this.serverUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "X-Agent-Id": this.agentId,
+        "X-Agent-Secret": this.agentSecret,
+        "Content-Type": "application/json",
+        "Content-Encoding": "gzip",
+      },
+      body: compressedBody,
+    });
+    if (!res.ok) {
+      const retryAfterSeconds = Number.parseInt(res.headers.get("Retry-After") ?? "", 10);
+      const retryAfterMs = Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1000 : null;
+      const text = await res.text().catch(() => "");
+      throw new AgentLogUploadError(
+        `API POST ${path} -> ${res.status}: ${text}`,
+        res.status,
+        retryAfterMs,
+      );
+    }
+    return res.json() as Promise<PushLogsResponse>;
   }
 
   /**

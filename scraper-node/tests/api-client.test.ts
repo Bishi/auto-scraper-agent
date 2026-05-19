@@ -1,6 +1,6 @@
 import { gunzipSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentApiClient, describeAgentApiError, isTransientAgentApiError, registerAgent } from "../src/api-client.js";
+import { AgentApiClient, AgentLogUploadError, describeAgentApiError, isTransientAgentApiError, registerAgent } from "../src/api-client.js";
 
 describe("describeAgentApiError", () => {
   it("normalizes fetch transport failures into a clearer server message", () => {
@@ -64,6 +64,48 @@ describe("AgentApiClient", () => {
       "Content-Encoding": "gzip",
     });
     expect(gunzipSync(init.body as Buffer).toString("utf8")).toBe(JSON.stringify(payload));
+  });
+
+  it("gzip-compresses pushed central logs and preserves Retry-After failures", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, accepted: 1, duplicates: 0, invalid: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "Rate limit exceeded." }), {
+          status: 429,
+          headers: { "Retry-After": "17" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentApiClient("https://dashboard.example", "agent-id", "agent-secret");
+    const entries = [{
+      clientLogId: "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      occurredAt: "2026-05-01T09:03:52.000Z",
+      level: 30 as const,
+      component: "agent" as const,
+      message: "Started",
+    }];
+
+    await expect(client.pushLogs(entries)).resolves.toEqual({ ok: true, accepted: 1, duplicates: 0, invalid: 0 });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://dashboard.example/api/agent/logs");
+    expect(init.headers).toMatchObject({
+      "X-Agent-Id": "agent-id",
+      "X-Agent-Secret": "agent-secret",
+      "Content-Encoding": "gzip",
+    });
+    expect(gunzipSync(init.body as Buffer).toString("utf8")).toBe(JSON.stringify({ entries }));
+
+    await expect(client.pushLogs(entries)).rejects.toMatchObject({
+      name: "AgentLogUploadError",
+      status: 429,
+      retryAfterMs: 17_000,
+    } satisfies Partial<AgentLogUploadError>);
   });
 
   it("registers with the profile API key bootstrap credential", async () => {

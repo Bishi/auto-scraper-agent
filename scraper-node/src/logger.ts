@@ -5,6 +5,7 @@ import { appendFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { LogEntry } from "./shared/types.js";
+import { enqueueCentralAgentLog } from "./central-log-queue.js";
 
 // UiLogEntry is the format the renderer expects: ISO timestamp + string level + plain message.
 export interface UiLogEntry {
@@ -59,11 +60,15 @@ const agentStream = new Writable({
     try {
       const line = chunk.toString().trim();
       if (line) {
-        const raw = JSON.parse(line) as { level: number; time: number; msg?: string };
+        const raw = JSON.parse(line) as { level: number; time: number; msg?: string; [key: string]: unknown };
         if (raw.msg) {
           pushAgent({
             ts: new Date(raw.time).toISOString(),
             level: pinoLevel(raw.level),
+            msg: raw.msg,
+          });
+          enqueueCentralAgentLog({
+            ...raw,
             msg: raw.msg,
           });
         }

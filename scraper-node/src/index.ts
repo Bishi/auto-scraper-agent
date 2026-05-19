@@ -7,6 +7,7 @@ import { AgentApiClient, registerAgent } from "./api-client.js";
 import { Scheduler } from "./scheduler.js";
 import { SIDECAR_TOKEN, isAuthorized } from "./auth.js";
 import { AGENT_LOG_BUFFER, SCRAPER_LOG_BUFFER, agentLogger } from "./logger.js";
+import { configureCentralLogUpload, stopCentralLogUpload } from "./central-log-queue.js";
 
 // Announce the token on stdout before the HTTP server starts.
 // Written via process.stdout.write (not console.log) to avoid the log buffer
@@ -17,7 +18,7 @@ process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.7.11";
+const AGENT_VERSION = "0.7.12";
 const REGISTRATION_RETRY_BASE_MS = 5_000;
 const REGISTRATION_RETRY_MAX_MS = 5 * 60_000;
 
@@ -116,6 +117,7 @@ async function startConfiguredAgent(config: AgentConfig, generation: number): Pr
   }
   writeConfig(ensured.config);
   client = ensured.client;
+  configureCentralLogUpload(client);
   if (ensured.registered) {
     agentLogger.info(`[agent] Registered device ${ensured.config.agentId}`);
   }
@@ -264,6 +266,7 @@ const server = http.createServer((req, res) => {
         }
         writeConfig(ensured.config);
         client = ensured.client;
+        configureCentralLogUpload(client);
         scheduler.stop();
         scheduler.start(client, AGENT_VERSION, ensured.config.schedulerPaused ?? false);
 
@@ -311,6 +314,7 @@ const server = http.createServer((req, res) => {
 
       if (method === "POST" && pathname === "/stop") {
         agentLogger.info("[agent] Application shutdown requested (POST /stop)");
+        stopCentralLogUpload();
         scheduler.stop();
         sendJson(res, 200, { ok: true });
         setTimeout(() => {
@@ -359,6 +363,7 @@ server.listen(PORT, "127.0.0.1", () => {
 
 function shutdownFromSignal(signal: string): void {
   agentLogger.info(`[agent] Application shutdown requested (${signal})`);
+  stopCentralLogUpload();
   scheduler.stop();
   setTimeout(() => {
     agentLogger.info("[agent] Application process exiting");

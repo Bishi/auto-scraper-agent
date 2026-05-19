@@ -1,9 +1,21 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { pushScraperLogs, sanitizeScraperLogEntry, SCRAPER_LOG_BUFFER } from "../src/logger.js";
+import { redactCentralLogContext, redactCentralLogText } from "../src/central-log-redaction.js";
+import {
+  AGENT_LOG_COMPONENTS,
+  AGENT_LOG_LEVELS,
+  AGENT_LOG_WAKE_SOURCES,
+  centralLogQueueSize,
+  configureCentralLogUpload,
+  enqueueCentralAgentLog,
+  flushCentralLogs,
+  resetCentralLogQueueForTests,
+} from "../src/central-log-queue.js";
 
 describe("scraper UI log formatting", () => {
   beforeEach(() => {
     SCRAPER_LOG_BUFFER.length = 0;
+    resetCentralLogQueueForTests();
   });
 
   it("renders pagination breadcrumbs without raw page URLs", () => {
@@ -54,5 +66,90 @@ describe("scraper UI log formatting", () => {
     expect(sanitized["url"]).toBeUndefined();
     expect(sanitized["pageUrl"]).toBeUndefined();
     expect(sanitized["nickname"]).toBe("Clio");
+  });
+});
+
+describe("central agent log redaction and spool", () => {
+  beforeEach(() => {
+    resetCentralLogQueueForTests();
+  });
+
+  it("keeps duplicated enums explicit for server contract parity", () => {
+    expect(AGENT_LOG_LEVELS).toEqual([20, 30, 40, 50, 60]);
+    expect(AGENT_LOG_COMPONENTS).toContain("heartbeat");
+    expect(AGENT_LOG_WAKE_SOURCES).toContain("ack_followup");
+  });
+
+  it("redacts secrets and PII before entries reach the spool", () => {
+    expect(redactCentralLogText("Authorization: Bearer abc.def.ghi token=secret me@example.com +386 40 123 456"))
+      .not.toContain("secret");
+    expect(redactCentralLogContext({
+      email: "me@example.com",
+      apikey: "secret",
+      "x-api-key": "secret",
+      sellerphone: "+38640123456",
+      nested: { url: "https://example.test/path?token=abc&x-api-key=def" },
+    })).toEqual({
+      email: "[REDACTED]",
+      apikey: "[REDACTED]",
+      "x-api-key": "[REDACTED]",
+      sellerphone: "[REDACTED]",
+      nested: { url: "https://example.test/path?token=[REDACTED]&x-api-key=[REDACTED]" },
+    });
+  });
+
+  it("queues bounded central agent logs without scraper progress logs", () => {
+    enqueueCentralAgentLog({
+      level: 30,
+      time: Date.UTC(2026, 4, 1, 9, 3, 52),
+      msg: "Heartbeat ok",
+      component: "heartbeat",
+      wakeSource: "interval",
+    });
+
+    expect(centralLogQueueSize()).toBe(1);
+  });
+
+  it("removes accepted, duplicate, and invalid entries after upload", async () => {
+    const pushLogs = vi.fn().mockResolvedValue({ ok: true, accepted: 1, duplicates: 0, invalid: 1 });
+    configureCentralLogUpload({ pushLogs } as unknown as Parameters<typeof configureCentralLogUpload>[0]);
+    enqueueCentralAgentLog({
+      level: 30,
+      time: Date.UTC(2026, 4, 1, 9, 3, 52),
+      msg: "one",
+    });
+    enqueueCentralAgentLog({
+      level: 30,
+      time: Date.UTC(2026, 4, 1, 9, 3, 53),
+      msg: "two",
+    });
+
+    await flushCentralLogs();
+
+    expect(centralLogQueueSize()).toBe(0);
+  });
+
+  it("keeps entries when a 413 split retry fails transiently", async () => {
+    const tooLarge = Object.assign(new Error("too large"), { status: 413 });
+    const networkError = new Error("network");
+    const pushLogs = vi.fn()
+      .mockRejectedValueOnce(tooLarge)
+      .mockRejectedValueOnce(networkError);
+    configureCentralLogUpload({ pushLogs } as unknown as Parameters<typeof configureCentralLogUpload>[0]);
+    enqueueCentralAgentLog({
+      level: 30,
+      time: Date.UTC(2026, 4, 1, 9, 3, 52),
+      msg: "one",
+    });
+    enqueueCentralAgentLog({
+      level: 30,
+      time: Date.UTC(2026, 4, 1, 9, 3, 53),
+      msg: "two",
+    });
+
+    await flushCentralLogs();
+
+    expect(pushLogs).toHaveBeenCalledTimes(2);
+    expect(centralLogQueueSize()).toBe(2);
   });
 });
