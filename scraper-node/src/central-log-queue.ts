@@ -68,7 +68,12 @@ let flushing = false;
 let backoffUntil = 0;
 let backoffMs = 5_000;
 let overflowEpisodeCount = 0;
+let localWarningSink: ((message: string) => void) | null = null;
 let entries: CentralLogEntry[] = loadSpool();
+
+export function configureCentralLogWarningSink(sink: ((message: string) => void) | null): void {
+  localWarningSink = sink;
+}
 
 function isComponent(value: unknown): value is AgentLogComponent {
   return typeof value === "string" && AGENT_LOG_COMPONENTS.includes(value as AgentLogComponent);
@@ -265,6 +270,26 @@ function dropBatch(batchSize: number): void {
   persistSpool();
 }
 
+function warnDroppedLogs(reason: string, count: number): void {
+  if (count <= 0) return;
+  const message = `[central-logs] Dropped ${count} queued central log${count === 1 ? "" : "s"}: ${reason}.`;
+  if (localWarningSink) {
+    localWarningSink(message);
+    return;
+  }
+  try {
+    process.stderr.write(`${message}\n`);
+  } catch {
+    // Best effort only; central upload failures must not affect the agent loop.
+  }
+}
+
+function dropBatchWithWarning(batchSize: number, reason: string): void {
+  const count = Math.min(batchSize, entries.length);
+  dropBatch(count);
+  warnDroppedLogs(reason, count);
+}
+
 function markRetry(error: UploadErrorLike): void {
   const retryAfter = error.retryAfterMs ?? 0;
   const delay = retryAfter > 0 ? retryAfter : backoffMs;
@@ -285,8 +310,8 @@ export async function flushCentralLogs(): Promise<void> {
   if (!client || disabledForSession || flushing || entries.length === 0) return;
   if (Date.now() < backoffUntil) return;
   flushing = true;
+  const batch = entries.slice(0, BATCH_SIZE);
   try {
-    const batch = entries.slice(0, BATCH_SIZE);
     const response = await uploadBatch(batch);
     const removeCount = Math.min(batch.length, response.accepted + response.duplicates + response.invalid);
     dropBatch(removeCount);
@@ -294,11 +319,10 @@ export async function flushCentralLogs(): Promise<void> {
   } catch (error) {
     const uploadError = error as UploadErrorLike;
     if (uploadError.status === 400) {
-      dropBatch(Math.min(BATCH_SIZE, entries.length));
+      dropBatchWithWarning(batch.length, "server rejected the central log batch as invalid");
     } else if (uploadError.status === 401 || uploadError.status === 403 || uploadError.status === 404) {
       disabledForSession = true;
     } else if (uploadError.status === 413) {
-      const batch = entries.slice(0, BATCH_SIZE);
       if (batch.length > 1) {
         const half = Math.max(1, Math.floor(batch.length / 2));
         try {
@@ -316,15 +340,15 @@ export async function flushCentralLogs(): Promise<void> {
           ) {
             disabledForSession = true;
           } else if (splitUploadError.status === 400) {
-            dropBatch(half);
+            dropBatchWithWarning(half, "server rejected split central log payload as invalid");
           } else if (splitUploadError.status === 413) {
-            dropBatch(1);
+            dropBatchWithWarning(1, "central log entry was too large to upload");
           } else {
             markRetry(splitUploadError);
           }
         }
       } else {
-        dropBatch(1);
+        dropBatchWithWarning(1, "central log entry was too large to upload");
       }
     } else {
       markRetry(uploadError);

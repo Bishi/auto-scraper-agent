@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { pushScraperLogs, sanitizeScraperLogEntry, SCRAPER_LOG_BUFFER } from "../src/logger.js";
+import { AGENT_LOG_BUFFER, pushScraperLogs, sanitizeScraperLogEntry, SCRAPER_LOG_BUFFER } from "../src/logger.js";
 import { redactCentralLogContext, redactCentralLogText } from "../src/central-log-redaction.js";
 import {
   AGENT_LOG_COMPONENTS,
@@ -9,6 +9,7 @@ import {
   configureCentralLogUpload,
   enqueueCentralAgentLog,
   flushCentralLogs,
+  configureCentralLogWarningSink,
   resetCentralLogQueueForTests,
 } from "../src/central-log-queue.js";
 
@@ -72,6 +73,14 @@ describe("scraper UI log formatting", () => {
 describe("central agent log redaction and spool", () => {
   beforeEach(() => {
     resetCentralLogQueueForTests();
+    configureCentralLogWarningSink((message) => {
+      AGENT_LOG_BUFFER.push({
+        ts: new Date(Date.UTC(2026, 4, 1, 9, 3, 54)).toISOString(),
+        level: "warn",
+        msg: message,
+      });
+    });
+    AGENT_LOG_BUFFER.length = 0;
   });
 
   it("keeps duplicated enums explicit for server contract parity", () => {
@@ -151,5 +160,38 @@ describe("central agent log redaction and spool", () => {
 
     expect(pushLogs).toHaveBeenCalledTimes(2);
     expect(centralLogQueueSize()).toBe(2);
+  });
+
+  it("warns locally when invalid central log batches are dropped", async () => {
+    const invalidBatch = Object.assign(new Error("invalid"), { status: 400 });
+    const pushLogs = vi.fn().mockRejectedValueOnce(invalidBatch);
+    configureCentralLogUpload({ pushLogs } as unknown as Parameters<typeof configureCentralLogUpload>[0]);
+    enqueueCentralAgentLog({
+      level: 30,
+      time: Date.UTC(2026, 4, 1, 9, 3, 52),
+      msg: "one",
+    });
+
+    await flushCentralLogs();
+
+    expect(centralLogQueueSize()).toBe(0);
+    expect(AGENT_LOG_BUFFER.at(-1)?.level).toBe("warn");
+    expect(AGENT_LOG_BUFFER.at(-1)?.msg).toContain("Dropped 1 queued central log");
+  });
+
+  it("warns locally when an unsplittable central log entry is too large", async () => {
+    const tooLarge = Object.assign(new Error("too large"), { status: 413 });
+    const pushLogs = vi.fn().mockRejectedValueOnce(tooLarge);
+    configureCentralLogUpload({ pushLogs } as unknown as Parameters<typeof configureCentralLogUpload>[0]);
+    enqueueCentralAgentLog({
+      level: 30,
+      time: Date.UTC(2026, 4, 1, 9, 3, 52),
+      msg: "one",
+    });
+
+    await flushCentralLogs();
+
+    expect(centralLogQueueSize()).toBe(0);
+    expect(AGENT_LOG_BUFFER.at(-1)?.msg).toContain("too large to upload");
   });
 });

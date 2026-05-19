@@ -5,7 +5,7 @@ import { appendFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { LogEntry } from "./shared/types.js";
-import { enqueueCentralAgentLog } from "./central-log-queue.js";
+import { configureCentralLogWarningSink, enqueueCentralAgentLog } from "./central-log-queue.js";
 
 // UiLogEntry is the format the renderer expects: ISO timestamp + string level + plain message.
 export interface UiLogEntry {
@@ -80,6 +80,8 @@ const agentStream = new Writable({
 
 // base: null suppresses default pino pid/hostname fields for cleaner output.
 export const agentLogger: Logger = pino({ level: "info", base: null }, agentStream) as unknown as Logger;
+
+configureCentralLogWarningSink((message) => agentLogger.warn(message));
 
 // ---------------------------------------------------------------------------
 // Scraper log buffer — in-memory only, populated as scraper modules emit logs.
