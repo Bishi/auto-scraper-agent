@@ -3,7 +3,7 @@ import { Scheduler } from "../src/scheduler.js";
 import type { AgentApiClient, HeartbeatOptions } from "../src/api-client.js";
 import { runModule } from "../src/scraper.js";
 import { agentLogger, SCRAPER_LOG_BUFFER } from "../src/logger.js";
-import { flushCentralLogs } from "../src/central-log-queue.js";
+import { centralLogUploadDisabledForSession, flushCentralLogs } from "../src/central-log-queue.js";
 
 vi.mock("../src/scraper.js", () => ({
   runModule: vi.fn(),
@@ -13,6 +13,7 @@ vi.mock("../src/central-log-queue.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/central-log-queue.js")>();
   return {
     ...actual,
+    centralLogUploadDisabledForSession: vi.fn().mockReturnValue(false),
     flushCentralLogs: vi.fn().mockResolvedValue(undefined),
   };
 });
@@ -32,9 +33,12 @@ function mockClient(): AgentApiClient {
 
 const runModuleMock = vi.mocked(runModule);
 const flushCentralLogsMock = vi.mocked(flushCentralLogs);
+const centralLogUploadDisabledForSessionMock = vi.mocked(centralLogUploadDisabledForSession);
 
 beforeEach(() => {
   flushCentralLogsMock.mockClear();
+  centralLogUploadDisabledForSessionMock.mockReset();
+  centralLogUploadDisabledForSessionMock.mockReturnValue(false);
 });
 
 describe("Scheduler - state machine", () => {
@@ -202,6 +206,44 @@ describe("Scheduler - heartbeat pause/resume", () => {
     } finally {
       vi.useRealTimers();
       flushCentralLogsMock.mockClear();
+    }
+  });
+
+  it("ACKs flush_logs without flushing when central log upload is disabled for the session", async () => {
+    vi.useFakeTimers();
+    try {
+      centralLogUploadDisabledForSessionMock.mockReturnValue(true);
+      const client = mockClient();
+      const hb = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          command: "flush_logs",
+          commandId: "flush-command-id",
+        })
+        .mockResolvedValue({ ok: true });
+      (client as unknown as { heartbeat: typeof hb }).heartbeat = hb;
+
+      const s = new Scheduler();
+      s.start(client as AgentApiClient, "1.0.0", true);
+
+      await vi.waitFor(() => expect(centralLogUploadDisabledForSessionMock).toHaveBeenCalled());
+      expect(flushCentralLogsMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(600);
+      await vi.waitFor(() => expect(hb).toHaveBeenCalledTimes(2));
+      expect(hb).toHaveBeenNthCalledWith(
+        2,
+        "1.0.0",
+        expect.any(String),
+        expect.objectContaining({
+          ackCommandId: "flush-command-id",
+          wakeSource: "ack_followup",
+        }),
+      );
+
+      s.stop();
+    } finally {
+      vi.useRealTimers();
     }
   });
 
