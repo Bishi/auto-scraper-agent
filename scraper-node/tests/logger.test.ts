@@ -194,4 +194,27 @@ describe("central agent log redaction and spool", () => {
     expect(centralLogQueueSize()).toBe(0);
     expect(AGENT_LOG_BUFFER.at(-1)?.msg).toContain("too large to upload");
   });
+
+  it("does not enqueue local central-drop warnings for central upload", async () => {
+    configureCentralLogWarningSink((message) => {
+      AGENT_LOG_BUFFER.push({
+        ts: new Date(Date.UTC(2026, 4, 1, 9, 3, 54)).toISOString(),
+        level: "warn",
+        msg: message,
+      });
+    });
+    const invalidBatch = Object.assign(new Error("invalid"), { status: 400 });
+    const pushLogs = vi.fn().mockRejectedValueOnce(invalidBatch);
+    configureCentralLogUpload({ pushLogs } as unknown as Parameters<typeof configureCentralLogUpload>[0]);
+    enqueueCentralAgentLog({
+      level: 30,
+      time: Date.UTC(2026, 4, 1, 9, 3, 52),
+      msg: "one",
+    });
+
+    await flushCentralLogs();
+
+    expect(centralLogQueueSize()).toBe(0);
+    expect(AGENT_LOG_BUFFER).toHaveLength(1);
+  });
 });

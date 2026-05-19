@@ -81,7 +81,13 @@ const agentStream = new Writable({
 // base: null suppresses default pino pid/hostname fields for cleaner output.
 export const agentLogger: Logger = pino({ level: "info", base: null }, agentStream) as unknown as Logger;
 
-configureCentralLogWarningSink((message) => agentLogger.warn(message));
+configureCentralLogWarningSink((message) => {
+  pushAgent({
+    ts: new Date().toISOString(),
+    level: "warn",
+    msg: message,
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Scraper log buffer — in-memory only, populated as scraper modules emit logs.
