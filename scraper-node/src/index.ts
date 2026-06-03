@@ -10,6 +10,7 @@ import {
   writeConfig,
   type AgentConfig,
 } from "./store.js";
+import { normalizeServerUrl } from "./server-url.js";
 import {
   AgentApiClient,
   consumePairingCode,
@@ -33,7 +34,7 @@ process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.8.5";
+const AGENT_VERSION = "0.8.6";
 const DEFAULT_SERVER_URL = "https://auto-scraper-develop.up.railway.app";
 const REGISTRATION_RETRY_BASE_MS = 5_000;
 const REGISTRATION_RETRY_MAX_MS = 5 * 60_000;
@@ -349,7 +350,11 @@ const server = http.createServer((req, res) => {
 
       if (method === "POST" && pathname === "/config") {
         const body = (await readBody(req)) as Record<string, unknown>;
-        const { apiKey, serverUrl } = body;
+        const { apiKey } = body;
+        const serverUrl =
+          typeof body.serverUrl === "string"
+            ? normalizeServerUrl(body.serverUrl)
+            : body.serverUrl;
 
         if (typeof serverUrl !== "string") {
           return sendJson(res, 400, { error: "serverUrl is required" });
@@ -427,7 +432,9 @@ const server = http.createServer((req, res) => {
       if (method === "POST" && pathname === "/pairing/consume") {
         const body = (await readBody(req)) as Record<string, unknown>;
         const serverUrl =
-          typeof body.serverUrl === "string" ? body.serverUrl.trim() : "";
+          typeof body.serverUrl === "string"
+            ? normalizeServerUrl(body.serverUrl)
+            : "";
         const code = typeof body.code === "string" ? body.code.trim() : "";
         if (!serverUrl || !code) {
           return sendJson(res, 400, {

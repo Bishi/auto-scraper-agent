@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { normalizeServerUrl } from "./server-url.js";
 
 export interface AgentConfig {
   apiKey?: string;
@@ -35,20 +36,35 @@ function readStoredConfig(): StoredAgentConfig {
 }
 
 function writeStoredConfig(config: StoredAgentConfig): void {
+  const normalizedConfig = {
+    ...config,
+    serverUrl:
+      typeof config.serverUrl === "string"
+        ? normalizeServerUrl(config.serverUrl)
+        : config.serverUrl,
+    credentialServerUrl:
+      typeof config.credentialServerUrl === "string"
+        ? normalizeServerUrl(config.credentialServerUrl)
+        : config.credentialServerUrl,
+  };
   mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
+  writeFileSync(CONFIG_FILE, JSON.stringify(normalizedConfig, null, 2), "utf8");
 }
 
 export function readConfig(): AgentConfig | null {
   const parsed = readStoredConfig();
   if (parsed.serverUrl && (parsed.apiKey || (parsed.agentId && parsed.agentSecret))) {
+    const serverUrl = normalizeServerUrl(parsed.serverUrl);
     return {
       apiKey: parsed.apiKey,
-      serverUrl: parsed.serverUrl,
+      serverUrl,
       schedulerPaused: parsed.schedulerPaused,
       agentId: parsed.agentId,
       agentSecret: parsed.agentSecret,
-      credentialServerUrl: parsed.credentialServerUrl,
+      credentialServerUrl:
+        typeof parsed.credentialServerUrl === "string"
+          ? normalizeServerUrl(parsed.credentialServerUrl)
+          : parsed.credentialServerUrl,
       credentialApiKey: parsed.credentialApiKey,
     };
   }

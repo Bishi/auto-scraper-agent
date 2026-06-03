@@ -59,6 +59,23 @@ describe("store", () => {
     expect(readConfig()?.schedulerPaused).toBe(true);
   });
 
+  it("normalizes trailing slashes from saved server URLs", async () => {
+    readFileSyncMock.mockReturnValue(JSON.stringify({
+      apiKey: "as_live_123",
+      serverUrl: "https://example.com/",
+      agentId: "agent-id",
+      agentSecret: "agent-secret",
+      credentialServerUrl: "https://example.com/",
+    }));
+
+    const { readConfig, hasUsableAgentCredentials } = await import("../src/store.js");
+    const config = readConfig();
+
+    expect(config?.serverUrl).toBe("https://example.com");
+    expect(config?.credentialServerUrl).toBe("https://example.com");
+    expect(config && hasUsableAgentCredentials(config)).toBe(true);
+  });
+
   it("merges schedulerPaused writes without clobbering saved credentials", async () => {
     readFileSyncMock.mockReturnValue(JSON.stringify({
       apiKey: "as_live_123",
@@ -92,7 +109,7 @@ describe("store", () => {
 
     writeConfig({
       apiKey: "as_live_new",
-      serverUrl: "https://example.com",
+      serverUrl: "https://example.com/",
     });
 
     expect(writeFileSyncMock).toHaveBeenCalledWith(

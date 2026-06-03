@@ -85,6 +85,34 @@ describe("AgentApiClient", () => {
     );
   });
 
+  it("normalizes trailing slashes before building API URLs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, summary: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new AgentApiClient(
+      "https://dashboard.example/",
+      "agent-id",
+      "agent-secret",
+    );
+
+    await client.pushResults({
+      moduleName: "avto-net",
+      jobPublicId: "abcdefghijkl",
+      listings: [],
+      logs: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dashboard.example/api/agent/results",
+      expect.any(Object),
+    );
+  });
+
   it("gzip-compresses pushed central logs and preserves Retry-After failures", async () => {
     const fetchMock = vi
       .fn()
@@ -157,7 +185,7 @@ describe("AgentApiClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      registerAgent("https://dashboard.example", "profile-key", {
+      registerAgent("https://dashboard.example/", "profile-key", {
         hostname: "desk",
         version: "1.0.0",
         platform: "win32",
@@ -194,7 +222,7 @@ describe("AgentApiClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      consumePairingCode("https://dashboard.example", "123456", {
+      consumePairingCode("https://dashboard.example/", "123456", {
         hostname: "desk",
         version: "1.0.0",
         platform: "win32",

@@ -7,6 +7,7 @@ import type {
   DebugSnapshotData,
 } from "./shared/types.js";
 import type { CentralLogEntry } from "./central-log-queue.js";
+import { normalizeServerUrl } from "./server-url.js";
 
 function stringifyAgentApiError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -221,11 +222,15 @@ export interface HeartbeatOptions {
 }
 
 export class AgentApiClient {
+  private readonly serverUrl: string;
+
   constructor(
-    private readonly serverUrl: string,
+    serverUrl: string,
     private readonly agentId: string,
     private readonly agentSecret: string,
-  ) {}
+  ) {
+    this.serverUrl = normalizeServerUrl(serverUrl);
+  }
 
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
     const url = `${this.serverUrl}${path}`;
@@ -411,7 +416,7 @@ export async function consumePairingCode(
   code: string,
   body: AgentRegistrationRequest,
 ): Promise<PairingConsumeResponse> {
-  const res = await fetch(`${serverUrl}/api/auth/agent-pairing/consume`, {
+  const res = await fetch(`${normalizeServerUrl(serverUrl)}/api/auth/agent-pairing/consume`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code, ...body }),
@@ -429,7 +434,7 @@ export async function registerAgent(
   apiKey: string,
   body: AgentRegistrationRequest,
 ): Promise<AgentRegistrationResponse> {
-  const res = await fetch(`${serverUrl}/api/agent/register`, {
+  const res = await fetch(`${normalizeServerUrl(serverUrl)}/api/agent/register`, {
     method: "POST",
     headers: {
       "X-API-Key": apiKey,
