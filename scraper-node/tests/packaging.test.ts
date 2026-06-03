@@ -42,4 +42,14 @@ describe("packaged setup and macOS runtime wiring", () => {
     expect(setupChromium).toContain("../src-tauri/resources");
     expect(setupChromium).toContain("chromium-headless-shell-${triple}");
   });
+
+  it("keeps ownership of the Tauri sidecar child process", async () => {
+    const tauriLib = await readRepoFile("src-tauri/src/lib.rs");
+
+    expect(tauriLib).toContain("static SIDECAR_CHILD");
+    expect(tauriLib).toContain("store_sidecar_child(child)");
+    expect(tauriLib).toContain("shutdown_sidecar_for_app_exit()");
+    expect(tauriLib).not.toContain("std::mem::forget(child)");
+    expect(tauriLib).not.toContain("std::mem::forget(new_child)");
+  });
 });

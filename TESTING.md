@@ -115,6 +115,7 @@ After a macOS build, install the DMG on a clean Mac and confirm:
 2. `codesign -d --entitlements :- "/Applications/Auto-Scraper Agent.app/Contents/MacOS/scraper-node"` includes `com.apple.security.cs.allow-jit`.
 3. `"/Applications/Auto-Scraper Agent.app/Contents/Resources/resources/chromium-headless-shell-*/icudtl.dat"` exists.
 4. A manual scrape can launch bundled Chromium without `icudtl.dat not found` or `SIGTRAP` browser logs.
+5. Quit the app, confirm no orphaned `scraper-node` remains listening on `127.0.0.1:9001`, then relaunch. If an older orphan is deliberately left running, the new app should replace it before opening the UI.
 
 ## 6. Tag a release
 

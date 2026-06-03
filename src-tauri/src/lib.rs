@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
+use std::process::Command as StdCommand;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
@@ -22,7 +23,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_shell::process::{Command, CommandEvent};
+use tauri_plugin_shell::process::{Command, CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
 // Prevents two concurrent update flows (startup check + manual "Check for Updates" click).
@@ -40,6 +41,8 @@ static DOWNLOAD_PROGRESS: Mutex<Option<String>> = Mutex::new(None);
 // Captured from sidecar stdout by the watchdog and required on every HTTP request
 // to the sidecar (except OPTIONS preflights and the /health endpoint).
 static SIDECAR_TOKEN: Mutex<Option<String>> = Mutex::new(None);
+static SIDECAR_CHILD: Mutex<Option<CommandChild>> = Mutex::new(None);
+static SIDECAR_SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 const DEFAULT_SERVER_URL: &str = "https://auto-scraper-develop.up.railway.app";
 // Guards the one-time splash + hidden setup window startup flow.
 static INITIAL_OPEN_DONE: AtomicBool = AtomicBool::new(false);
@@ -404,6 +407,83 @@ fn bundled_sidecar_path(name: &str) -> Option<PathBuf> {
     }
 
     Some(path)
+}
+
+fn sidecar_health_available(timeout: Duration) -> bool {
+    reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .ok()
+        .and_then(|client| client.get("http://127.0.0.1:9001/health").send().ok())
+        .map(|response| response.status().is_success())
+        .unwrap_or(false)
+}
+
+fn store_sidecar_child(child: CommandChild) {
+    if let Ok(mut guard) = SIDECAR_CHILD.lock() {
+        if let Some(previous) = guard.take() {
+            let _ = previous.kill();
+        }
+        *guard = Some(child);
+    } else {
+        let _ = child.kill();
+    }
+}
+
+fn clear_sidecar_child() {
+    if let Ok(mut guard) = SIDECAR_CHILD.lock() {
+        let _ = guard.take();
+    }
+}
+
+fn kill_owned_sidecar_child() {
+    if let Ok(mut guard) = SIDECAR_CHILD.lock() {
+        if let Some(child) = guard.take() {
+            let _ = child.kill();
+        }
+    }
+}
+
+fn cleanup_stale_sidecar_before_spawn() {
+    if !sidecar_health_available(Duration::from_millis(350)) {
+        return;
+    }
+
+    eprintln!("[agent] Found an existing sidecar on 127.0.0.1:9001; replacing it before startup.");
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(path) = bundled_sidecar_path("scraper-node") {
+            let _ = StdCommand::new("pkill")
+                .arg("-f")
+                .arg(path.to_string_lossy().as_ref())
+                .status();
+        }
+        let _ = std::fs::remove_file("/tmp/com_autoscraper_agent_si.sock");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = StdCommand::new("taskkill")
+            .args(["/F", "/IM", "scraper-node.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+
+    thread::sleep(Duration::from_millis(700));
+}
+
+fn shutdown_sidecar_for_app_exit() {
+    if SIDECAR_SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let _ = with_token(reqwest::blocking::Client::new().post("http://127.0.0.1:9001/stop")).send();
+    thread::sleep(Duration::from_millis(700));
+    kill_owned_sidecar_child();
+    if let Ok(mut guard) = SIDECAR_TOKEN.lock() {
+        *guard = None;
+    }
 }
 
 fn chromium_target_triple() -> &'static str {
@@ -1327,9 +1407,7 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
             });
         }
         "quit" => {
-            let _ = with_token(reqwest::blocking::Client::new().post("http://127.0.0.1:9001/stop"))
-                .send();
-            thread::sleep(Duration::from_millis(600));
+            shutdown_sidecar_for_app_exit();
             app.exit(0);
         }
         _ => {}
@@ -1394,6 +1472,8 @@ pub fn run() {
                 }
             });
 
+            cleanup_stale_sidecar_before_spawn();
+
             // Spawn the Node.js sidecar.
             let sidecar_cmd = app
                 .shell()
@@ -1405,10 +1485,7 @@ pub fn run() {
                 .spawn()
                 .expect("failed to spawn scraper-node sidecar");
 
-            // Prevent any kill-on-drop behaviour. The sidecar must live for
-            // the entire app lifetime; the "Quit" menu item shuts it down via
-            // POST /stop before calling app.exit(0).
-            std::mem::forget(child);
+            store_sidecar_child(child);
 
             // Watchdog: drain the event channel (keeps the OS pipe flowing so
             // sidecar stdout never blocks) and restart the sidecar automatically
@@ -1441,6 +1518,7 @@ pub fn run() {
                                 }
                             }
                             CommandEvent::Terminated(payload) => {
+                                clear_sidecar_child();
                                 eprintln!(
                                     "[agent] Sidecar exited (code {:?}), restarting in 3 s…",
                                     payload.code
@@ -1449,6 +1527,9 @@ pub fn run() {
                                 // rather than silently using a dead secret.
                                 if let Ok(mut guard) = SIDECAR_TOKEN.lock() {
                                     *guard = None;
+                                }
+                                if SIDECAR_SHUTTING_DOWN.load(Ordering::SeqCst) {
+                                    return;
                                 }
                                 break;
                             }
@@ -1469,7 +1550,7 @@ pub fn run() {
                         .and_then(|c| c.spawn())
                     {
                         Ok((new_rx, new_child)) => {
-                            std::mem::forget(new_child);
+                            store_sidecar_child(new_child);
                             rx = new_rx;
                             eprintln!("[agent] Sidecar restarted.");
                         }
@@ -1628,6 +1709,8 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 if code.is_none() {
                     api.prevent_exit();
+                } else {
+                    shutdown_sidecar_for_app_exit();
                 }
             }
         });
