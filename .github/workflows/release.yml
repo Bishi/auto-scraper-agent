@@ -1,0 +1,403 @@
+name: Release
+
+# Trigger on version tags (v1.2.3) or manually for testing
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create GitHub Releases
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # Evaluated once at job start so it can be used in step `if:` conditions.
+      # secrets context is not permitted inside step-level if expressions.
+      HAS_SIGNING_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Toolchains
+      # -----------------------------------------------------------------------
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          # Include scraper-node lock file so its dep changes also bust the cache
+          cache-dependency-path: |
+            package-lock.json
+            scraper-node/package-lock.json
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          # Shared key lets tag builds reuse the cache from the preceding push
+          # on the same Cargo.lock, avoiding a full recompile on every release.
+          shared-key: "tauri-windows"
+          cache-on-failure: true
+
+      # -----------------------------------------------------------------------
+      # Node dependencies
+      # -----------------------------------------------------------------------
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install scraper-node dependencies
+        working-directory: scraper-node
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # Security checks
+      # Only audit production deps — Playwright's bundled Chromium regularly
+      # carries high-severity CVEs that are irrelevant to the shipped binary.
+      # -----------------------------------------------------------------------
+      - name: Dependency audit (root)
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Dependency audit (scraper-node)
+        working-directory: scraper-node
+        run: npm audit --audit-level=high --omit=dev
+
+      # -----------------------------------------------------------------------
+      # Type checking
+      # -----------------------------------------------------------------------
+      - name: Typecheck scraper-node
+        working-directory: scraper-node
+        run: npm run typecheck
+
+      # -----------------------------------------------------------------------
+      # Tests
+      # -----------------------------------------------------------------------
+      - name: Run parser tests
+        working-directory: scraper-node
+        run: npm test
+
+      # -----------------------------------------------------------------------
+      # Sync version fields from the git tag (tag builds only)
+      #
+      # Both tauri.conf.json (controls installer name / Tauri getVersion()) and
+      # AGENT_VERSION in scraper-node/src/index.ts (sent in heartbeat calls)
+      # must match the tag before the sidecar binary is built.
+      # -----------------------------------------------------------------------
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag     = '${{ github.ref_name }}'
+          $version = $tag -replace '^v', ''
+
+          # tauri.conf.json
+          $cfg = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $cfg.version = $version
+          $cfg | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json -Encoding UTF8
+          Write-Host "tauri.conf.json -> $version"
+
+          # scraper-node/src/index.ts  (const AGENT_VERSION = "x.y.z")
+          $src = Get-Content scraper-node/src/index.ts -Raw
+          $src = $src -replace '(?<=const AGENT_VERSION = ")[^"]+(?=")', $version
+          Set-Content scraper-node/src/index.ts -Value $src -Encoding UTF8 -NoNewline
+          Write-Host "AGENT_VERSION -> $version"
+
+      # -----------------------------------------------------------------------
+      # Build Node SEA sidecar  ->  src-tauri/binaries/scraper-node-*.exe
+      # -----------------------------------------------------------------------
+      - name: Build Node SEA sidecar
+        working-directory: scraper-node
+        run: node build.mjs
+
+      # -----------------------------------------------------------------------
+      # Download Playwright Chromium headless-shell  ->  src-tauri/binaries/
+      # -----------------------------------------------------------------------
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.LOCALAPPDATA }}\ms-playwright
+          key: playwright-chromium-${{ hashFiles('scraper-node/package-lock.json') }}
+
+      - name: Download Chromium headless-shell
+        working-directory: scraper-node
+        run: node setup-chromium.mjs
+
+      # -----------------------------------------------------------------------
+      # Windows code signing — Round 1: sign the scraper-node sidecar BEFORE
+      # the Tauri build bundles it into the NSIS installer.
+      #
+      # Why two rounds?
+      #   The NSIS installer extracts its payload to disk on install.  If only
+      #   the outer installer is signed, the extracted sidecar .exe files are
+      #   unsigned and may be flagged by Windows Defender or enterprise EDR
+      #   tools when they are first launched.  Signing the sidecar here ensures
+      #   every .exe on disk after installation carries a valid signature.
+      #
+      #   The Chromium headless-shell is intentionally excluded — it is already
+      #   signed by Google and re-signing would invalidate that signature.
+      #
+      # To enable signing:
+      #   1. Obtain a Windows code signing certificate (.pfx file)
+      #      Recommended: EV cert (DigiCert, Sectigo) — immediately trusted by
+      #      SmartScreen with no reputation-building period (~$300/yr).
+      #      OV cert also works but SmartScreen shows a warning until the binary
+      #      accumulates enough downloads to build reputation.
+      #   2. Base64-encode it:  certutil -encode cert.pfx cert.b64
+      #   3. Add GitHub secrets:
+      #        WINDOWS_CERTIFICATE          -- base64-encoded .pfx content
+      #        WINDOWS_CERTIFICATE_PASSWORD -- .pfx password
+      # -----------------------------------------------------------------------
+      - name: Sign scraper-node sidecar
+        if: env.HAS_SIGNING_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $bytes   = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $pfxPath = Join-Path $env:TEMP "signing.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
+
+          try {
+            $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
+              -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match "x64" } |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+
+            if (-not $signtool) { throw "signtool.exe not found" }
+
+            # Sign only scraper-node — exclude chromium-headless-shell (Google-signed)
+            Get-ChildItem -Path "src-tauri\binaries\scraper-node-*.exe" | ForEach-Object {
+              Write-Host "Signing sidecar: $($_.Name)"
+              & $signtool sign `
+                /f $pfxPath `
+                /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+                /tr http://timestamp.digicert.com `
+                /td sha256 /fd sha256 `
+                $_.FullName
+              if ($LASTEXITCODE -ne 0) { throw "signtool exited with $LASTEXITCODE for $($_.Name)" }
+            }
+          } finally {
+            Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
+          }
+
+      # -----------------------------------------------------------------------
+      # Tauri NSIS build — bundles the (now-signed) scraper-node sidecar
+      # -----------------------------------------------------------------------
+      - name: Build Tauri app (NSIS installer)
+        run: npm run build:tauri:windows
+
+      # -----------------------------------------------------------------------
+      # Windows code signing — Round 2: sign the NSIS installer itself.
+      # This is what SmartScreen checks at download/run time.
+      # -----------------------------------------------------------------------
+      - name: Sign NSIS installer
+        if: env.HAS_SIGNING_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $bytes   = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $pfxPath = Join-Path $env:TEMP "signing.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, $bytes)
+
+          try {
+            $signtool = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
+              -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match "x64" } |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+
+            if (-not $signtool) { throw "signtool.exe not found" }
+
+            Get-ChildItem -Path "src-tauri\target\release\bundle\nsis\*.exe" | ForEach-Object {
+              Write-Host "Signing installer: $($_.Name)"
+              & $signtool sign `
+                /f $pfxPath `
+                /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+                /tr http://timestamp.digicert.com `
+                /td sha256 /fd sha256 `
+                $_.FullName
+              if ($LASTEXITCODE -ne 0) { throw "signtool exited with $LASTEXITCODE for $($_.Name)" }
+            }
+          } finally {
+            Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
+          }
+
+      # -----------------------------------------------------------------------
+      # Always upload installer as a workflow artifact (useful for debugging)
+      # -----------------------------------------------------------------------
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-scraper-agent-windows
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      # -----------------------------------------------------------------------
+      # Tag build -> create versioned GitHub Release
+      #
+      # Download URL patterns
+      # ============================================================
+      # Specific release (stable):
+      #   https://github.com/Bishi/auto-scraper-agent/releases/download/v{version}/Auto-Scraper.Agent_{version}_x64-setup.exe
+      #   Example:
+      #   https://github.com/Bishi/auto-scraper-agent/releases/download/v0.5.27/Auto-Scraper.Agent_0.5.27_x64-setup.exe
+      #
+      # Latest stable (GitHub redirect — always points to newest tag):
+      #   https://github.com/Bishi/auto-scraper-agent/releases/latest/download/Auto-Scraper.Agent_{version}_x64-setup.exe
+      #   Note: filename still contains version so it changes per release.
+      #   Redirect target: https://github.com/Bishi/auto-scraper-agent/releases/latest
+      #
+      # Rolling pre-release (manual workflow_dispatch):
+      #   https://github.com/Bishi/auto-scraper-agent/releases/download/latest/Auto-Scraper.Agent_{version}_x64-setup.exe
+      #
+      # GitHub API (machine-readable, stable URL):
+      #   https://api.github.com/repos/Bishi/auto-scraper-agent/releases/latest
+      #   -> .assets[].browser_download_url  (contains signed .exe URL)
+      # -----------------------------------------------------------------------
+      - name: Create GitHub Release (versioned)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/release/bundle/nsis/*.exe
+          generate_release_notes: true
+
+      # -----------------------------------------------------------------------
+      # Manual run -> create/update a rolling "latest" pre-release
+      # -----------------------------------------------------------------------
+      - name: Update "latest" pre-release (manual build)
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/release/bundle/nsis/*.exe
+          tag_name: latest
+          name: "Latest Build"
+          prerelease: true
+          body: |
+            Rolling pre-release -- built from `${{ github.ref_name }}` @ ${{ github.sha }}
+
+  build-macos:
+    name: Build macOS DMG
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            asset_arch: aarch64
+          - runner: macos-15-intel
+            asset_arch: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            scraper-node/package-lock.json
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: "tauri-macos-${{ matrix.asset_arch }}"
+          cache-on-failure: true
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install scraper-node dependencies
+        working-directory: scraper-node
+        run: npm ci
+
+      - name: Dependency audit (root)
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Dependency audit (scraper-node)
+        working-directory: scraper-node
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Typecheck scraper-node
+        working-directory: scraper-node
+        run: npm run typecheck
+
+      - name: Run parser tests
+        working-directory: scraper-node
+        run: npm test
+
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          export VERSION="${GITHUB_REF_NAME#v}"
+          node -e "const fs=require('fs'); const p='src-tauri/tauri.conf.json'; const cfg=JSON.parse(fs.readFileSync(p,'utf8')); cfg.version=process.env.VERSION; fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n');"
+          node -e "const fs=require('fs'); const p='scraper-node/src/index.ts'; const src=fs.readFileSync(p,'utf8').replace(/(?<=const AGENT_VERSION = \")[^\"]+(?=\")/, process.env.VERSION); fs.writeFileSync(p, src);"
+
+      - name: Build Node SEA sidecar
+        working-directory: scraper-node
+        run: node build.mjs
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-chromium-macos-${{ matrix.asset_arch }}-${{ hashFiles('scraper-node/package-lock.json') }}
+
+      - name: Download Chromium headless-shell
+        working-directory: scraper-node
+        run: node setup-chromium.mjs
+
+      - name: Build Tauri app (macOS DMG)
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+        run: npm run build:tauri:mac
+
+      - name: Normalize DMG asset name
+        run: |
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          mkdir -p src-tauri/target/release/bundle/macos-release
+          cp src-tauri/target/release/bundle/dmg/*.dmg "src-tauri/target/release/bundle/macos-release/Auto-Scraper.Agent_${VERSION}_${{ matrix.asset_arch }}.dmg"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-scraper-agent-macos-${{ matrix.asset_arch }}
+          path: src-tauri/target/release/bundle/macos-release/*.dmg
+          if-no-files-found: error
+
+      - name: Add DMG to GitHub Release (versioned)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/release/bundle/macos-release/*.dmg
+
+      - name: Add DMG to "latest" pre-release (manual build)
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/release/bundle/macos-release/*.dmg
+          tag_name: latest
+          name: "Latest Build"
+          prerelease: true
+          body: |
+            Rolling pre-release -- built from `${{ github.ref_name }}` @ ${{ github.sha }}

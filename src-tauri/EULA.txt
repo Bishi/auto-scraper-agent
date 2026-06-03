@@ -1,0 +1,17 @@
+AUTO-SCRAPER AGENT — END USER LICENSE AND TERMS
+
+By installing or using this software, you agree to the following:
+
+1. ACCEPTABLE USE
+   You will use this program only in compliance with applicable laws and with the terms of service of every website you access. You will not use it to circumvent technical protections, authentication, rate limits, or paywalls you are not authorized to bypass.
+
+2. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+3. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM YOUR USE OF THIS SOFTWARE OR FROM DATA YOU COLLECT OR PROCESS WITH IT.
+
+4. DISTRIBUTION
+   This binary may be redistributed only in accordance with the MIT License included with the source distribution. Third-party components (e.g. Chromium) remain subject to their respective licenses.
+
+For the MIT license text, see the LICENSE file in the repository.

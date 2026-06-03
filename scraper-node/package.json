@@ -1,0 +1,32 @@
+{
+  "name": "auto-scraper-scraper-node",
+  "version": "0.1.0",
+  "description": "Node.js sidecar for the Auto-Scraper Tauri agent",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build:sea": "node build.mjs",
+    "setup:chromium": "node setup-chromium.mjs"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "pino": "^10.3.1",
+    "playwright": "^1.58.2",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "puppeteer-extra-plugin-user-preferences": "^2.4.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "esbuild": "^0.27.4",
+    "postject": "^1.0.0-alpha.6",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

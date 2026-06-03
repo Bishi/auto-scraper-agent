@@ -1,0 +1,155 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const readFileSyncMock = vi.fn();
+const writeFileSyncMock = vi.fn();
+const mkdirSyncMock = vi.fn();
+
+vi.mock("node:fs", () => ({
+  readFileSync: readFileSyncMock,
+  writeFileSync: writeFileSyncMock,
+  mkdirSync: mkdirSyncMock,
+}));
+
+const homedirMock = vi.fn(() => "C:\\Users\\tester");
+
+vi.mock("node:os", () => ({
+  homedir: homedirMock,
+}));
+
+describe("store", () => {
+  beforeEach(() => {
+    readFileSyncMock.mockReset();
+    writeFileSyncMock.mockReset();
+    mkdirSyncMock.mockReset();
+    homedirMock.mockClear();
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it("reads legacy config files without schedulerPaused", async () => {
+    readFileSyncMock.mockReturnValue(JSON.stringify({
+      apiKey: "as_live_123",
+      serverUrl: "http://localhost:3000",
+    }));
+
+    const { readConfig } = await import("../src/store.js");
+
+    expect(readConfig()).toEqual({
+      apiKey: "as_live_123",
+      serverUrl: "http://localhost:3000",
+      schedulerPaused: undefined,
+      agentId: undefined,
+      agentSecret: undefined,
+      credentialServerUrl: undefined,
+      credentialApiKey: undefined,
+    });
+  });
+
+  it("reads schedulerPaused from saved config", async () => {
+    readFileSyncMock.mockReturnValue(JSON.stringify({
+      apiKey: "as_live_123",
+      serverUrl: "http://localhost:3000",
+      schedulerPaused: true,
+    }));
+
+    const { readConfig } = await import("../src/store.js");
+
+    expect(readConfig()?.schedulerPaused).toBe(true);
+  });
+
+  it("merges schedulerPaused writes without clobbering saved credentials", async () => {
+    readFileSyncMock.mockReturnValue(JSON.stringify({
+      apiKey: "as_live_123",
+      serverUrl: "http://localhost:3000",
+    }));
+
+    const { updateConfig } = await import("../src/store.js");
+
+    updateConfig({ schedulerPaused: true });
+
+    expect(mkdirSyncMock).toHaveBeenCalledOnce();
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      expect.stringContaining("agent.json"),
+      JSON.stringify({
+        apiKey: "as_live_123",
+        serverUrl: "http://localhost:3000",
+        schedulerPaused: true,
+      }, null, 2),
+      "utf8",
+    );
+  });
+
+  it("preserves schedulerPaused when saving config changes", async () => {
+    readFileSyncMock.mockReturnValue(JSON.stringify({
+      apiKey: "as_live_old",
+      serverUrl: "http://localhost:3000",
+      schedulerPaused: true,
+    }));
+
+    const { writeConfig } = await import("../src/store.js");
+
+    writeConfig({
+      apiKey: "as_live_new",
+      serverUrl: "https://example.com",
+    });
+
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      expect.stringContaining("agent.json"),
+      JSON.stringify({
+        apiKey: "as_live_new",
+        serverUrl: "https://example.com",
+        schedulerPaused: true,
+      }, null, 2),
+      "utf8",
+    );
+  });
+
+  it("clears paired device credentials while preserving local settings", async () => {
+    readFileSyncMock.mockReturnValue(JSON.stringify({
+      apiKey: "as_live_123",
+      serverUrl: "https://example.com",
+      schedulerPaused: true,
+      agentId: "agent-id",
+      agentSecret: "agent-secret",
+      credentialServerUrl: "https://example.com",
+    }));
+
+    const { clearAgentCredentials } = await import("../src/store.js");
+
+    clearAgentCredentials();
+
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      expect.stringContaining("agent.json"),
+      JSON.stringify({
+        serverUrl: "https://example.com",
+        schedulerPaused: true,
+      }, null, 2),
+      "utf8",
+    );
+  });
+
+  it("recognizes agent credentials only for the matching setup tuple", async () => {
+    readFileSyncMock.mockReturnValue("{}");
+    const { hasUsableAgentCredentials } = await import("../src/store.js");
+
+    expect(hasUsableAgentCredentials({
+      apiKey: "key-1",
+      serverUrl: "https://server",
+      agentId: "agent-id",
+      agentSecret: "agent-secret",
+      credentialApiKey: "key-1",
+      credentialServerUrl: "https://server",
+    })).toBe(true);
+
+    expect(hasUsableAgentCredentials({
+      apiKey: "key-2",
+      serverUrl: "https://server",
+      agentId: "agent-id",
+      agentSecret: "agent-secret",
+      credentialApiKey: "key-1",
+      credentialServerUrl: "https://server",
+    })).toBe(false);
+  });
+});

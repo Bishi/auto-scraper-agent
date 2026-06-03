@@ -1,0 +1,210 @@
+import {
+  isTerminalAgentCredentialError,
+  type AgentApiClient,
+} from "./api-client.js";
+import { agentLogger } from "./logger.js";
+
+const MIN_RECONNECT_MS = 1_000;
+const MAX_RECONNECT_MS = 30_000;
+const TOKEN_REFRESH_SKEW_MS = 60_000;
+const TOKEN_REFRESH_CLOSE_CODE = 4001;
+const TOKEN_REFRESH_CLOSE_REASON = "token refresh";
+const TERMINAL_CLOSE_CODE = 4003;
+const TERMINAL_CLOSE_REASONS = new Set([
+  "forgotten",
+  "removed",
+  "revoked",
+  "paired_to_another_account",
+  "agent_disconnected",
+]);
+
+function jitter(ms: number): number {
+  return Math.round(ms * (0.8 + Math.random() * 0.4));
+}
+
+export class AgentWebSocketClient {
+  private socket: WebSocket | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = true;
+  private reconnectAttempt = 0;
+  private lastCommandHintId: string | null = null;
+  private tokenRefreshInProgress = false;
+  private suppressNextConnectedMessage = false;
+  private logNextReconnectSuccess = false;
+
+  constructor(
+    private readonly client: AgentApiClient,
+    private readonly onCommandAvailable: (commandId: string) => void = () => {},
+    private readonly onTerminalCredentials: (reason: string) => void = () => {},
+  ) {}
+
+  start(): void {
+    if (!this.stopped) return;
+    this.stopped = false;
+    void this.connect();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.reconnectTimer = null;
+    this.refreshTimer = null;
+    this.socket?.close(1000, "stopped");
+    this.socket = null;
+  }
+
+  private async connect(): Promise<void> {
+    if (this.stopped) return;
+
+    try {
+      const { token, expiresAt } = await this.client.getWsToken();
+      if (this.stopped) return;
+
+      const socket = new WebSocket(this.client.wsUrl(token));
+      this.socket = socket;
+
+      socket.addEventListener("open", () => {
+        this.reconnectAttempt = 0;
+        this.scheduleTokenRefresh(expiresAt);
+        if (this.tokenRefreshInProgress) {
+          this.tokenRefreshInProgress = false;
+          this.suppressNextConnectedMessage = true;
+          if (this.logNextReconnectSuccess) {
+            this.logNextReconnectSuccess = false;
+            agentLogger.info("[ws] Reconnected after token refresh failure");
+          }
+        } else {
+          if (this.logNextReconnectSuccess) {
+            this.logNextReconnectSuccess = false;
+            agentLogger.info("[ws] Reconnected after token refresh failure");
+          } else {
+            agentLogger.info("[ws] Connected to agent WebSocket");
+          }
+          this.fireImmediateHeartbeat("connect");
+        }
+      });
+
+      socket.addEventListener("message", (event) => {
+        this.logMessage(event.data);
+      });
+
+      socket.addEventListener("close", (event) => {
+        if (this.socket !== socket) return;
+        this.socket = null;
+        if (this.refreshTimer) clearTimeout(this.refreshTimer);
+        this.refreshTimer = null;
+        const closeMessage = `[ws] Closed code=${event.code} reason=${event.reason || "none"}`;
+        if (
+          event.code === TOKEN_REFRESH_CLOSE_CODE &&
+          event.reason === TOKEN_REFRESH_CLOSE_REASON
+        ) {
+          // Expected token rotation path; logged once when the replacement socket opens.
+        } else {
+          agentLogger.warn(closeMessage);
+          this.tokenRefreshInProgress = false;
+          this.suppressNextConnectedMessage = false;
+        }
+        if (
+          event.code === TERMINAL_CLOSE_CODE &&
+          TERMINAL_CLOSE_REASONS.has(event.reason)
+        ) {
+          this.stop();
+          this.onTerminalCredentials(event.reason);
+          return;
+        }
+        this.scheduleReconnect();
+      });
+
+      socket.addEventListener("error", () => {
+        agentLogger.warn("[ws] Connection error");
+      });
+    } catch (err) {
+      if (!this.stopped) {
+        const wasRefreshing = this.tokenRefreshInProgress;
+        this.tokenRefreshInProgress = false;
+        this.suppressNextConnectedMessage = false;
+        if (isTerminalAgentCredentialError(err)) {
+          this.stop();
+          this.onTerminalCredentials(err.revocationReason ?? err.code);
+        } else if (wasRefreshing) {
+          this.logNextReconnectSuccess = true;
+          agentLogger.warn(
+            `[ws] Token refresh reconnect failed: ${String(err)}`,
+          );
+          this.scheduleReconnect();
+        } else {
+          agentLogger.warn(`[ws] Failed to connect: ${String(err)}`);
+          this.scheduleReconnect();
+        }
+      }
+    }
+  }
+
+  private scheduleTokenRefresh(expiresAt: number): void {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    const delay = Math.max(
+      30_000,
+      expiresAt * 1000 - Date.now() - TOKEN_REFRESH_SKEW_MS,
+    );
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      if (this.stopped) return;
+      this.tokenRefreshInProgress = true;
+      this.socket?.close(TOKEN_REFRESH_CLOSE_CODE, TOKEN_REFRESH_CLOSE_REASON);
+      this.scheduleReconnect(0);
+    }, delay);
+  }
+
+  private scheduleReconnect(delayOverride?: number): void {
+    if (this.stopped || this.reconnectTimer) return;
+    const backoff = Math.min(
+      MAX_RECONNECT_MS,
+      MIN_RECONNECT_MS * 2 ** this.reconnectAttempt,
+    );
+    this.reconnectAttempt += 1;
+    const delay = delayOverride ?? jitter(backoff);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect();
+    }, delay);
+  }
+
+  private logMessage(data: unknown): void {
+    if (typeof data !== "string") return;
+    try {
+      const parsed = JSON.parse(data) as { type?: unknown };
+      if (parsed.type === "connected") {
+        if (this.suppressNextConnectedMessage) {
+          this.suppressNextConnectedMessage = false;
+          return;
+        }
+        agentLogger.info("[ws] Server accepted connection");
+        return;
+      }
+
+      if (parsed.type === "command.available") {
+        const commandId = (parsed as { commandId?: unknown }).commandId;
+        if (typeof commandId !== "string" || commandId.length === 0) return;
+        if (commandId === this.lastCommandHintId) return;
+        this.lastCommandHintId = commandId;
+        agentLogger.info(
+          { central: false, component: "ws" },
+          "[ws] Command available - firing immediate heartbeat",
+        );
+        this.fireImmediateHeartbeat(commandId);
+      }
+    } catch {
+      agentLogger.warn("[ws] Ignoring non-JSON message");
+    }
+  }
+
+  private fireImmediateHeartbeat(commandId: string): void {
+    try {
+      this.onCommandAvailable(commandId);
+    } catch (err) {
+      agentLogger.warn(`[ws] Command wake callback failed: ${String(err)}`);
+    }
+  }
+}

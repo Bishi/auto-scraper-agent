@@ -1,0 +1,21 @@
+{
+  "name": "auto-scraper-agent",
+  "version": "0.1.0",
+  "description": "Tauri tray agent for Auto-Scraper",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "generate:icons": "node generate-icons.mjs",
+    "build:sidecar": "cd scraper-node && node build.mjs",
+    "build:tauri": "tauri build --bundles nsis",
+    "build:tauri:windows": "tauri build --bundles nsis",
+    "build:tauri:mac": "tauri build --bundles app,dmg",
+    "build:mac": "npm run build:sidecar && npm run build:tauri:mac",
+    "build": "npm run build:sidecar && npm run build:tauri:windows",
+    "dev": "tauri dev",
+    "typecheck": "tsc --noEmit -p scraper-node/tsconfig.json"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
