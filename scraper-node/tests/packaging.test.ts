@@ -52,4 +52,13 @@ describe("packaged setup and macOS runtime wiring", () => {
     expect(tauriLib).not.toContain("std::mem::forget(child)");
     expect(tauriLib).not.toContain("std::mem::forget(new_child)");
   });
+
+  it("does not reuse the bundled headless shell for headed browser mode", async () => {
+    const scraper = await readRepoFile("scraper-node/src/scraper.ts");
+
+    expect(scraper).toContain("resolveBrowserExecutablePath(headless)");
+    expect(scraper).toContain("isHeadlessShellPath(chromiumPath)");
+    expect(scraper).toContain("headless=false; ignoring bundled chromium-headless-shell");
+    expect(scraper).toContain("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+  });
 });

@@ -1,10 +1,10 @@
 import pino from "pino";
 import type { Logger } from "pino";
 import { Writable } from "node:stream";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { agentLogger, sanitizeScraperLogEntry } from "./logger.js";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { BrowserManager } from "./shared/browser/context.js";
 import { getModule } from "./shared/modules/registry.js";
 import { normalizeUrlEntry } from "./shared/config.js";
@@ -63,6 +63,74 @@ export interface ScrapeResult {
   debugSnapshots: DebugSnapshotData[];
 }
 
+function isHeadlessShellPath(path: string | undefined): boolean {
+  return path?.toLowerCase().includes("headless-shell") ?? false;
+}
+
+function firstExistingPath(paths: Array<string | undefined>): string | undefined {
+  return paths.find((path) => path != null && existsSync(path));
+}
+
+function headedBrowserPath(): string | undefined {
+  const envPath = firstExistingPath([
+    process.env["CHROMIUM_HEADED_PATH"],
+    process.env["CHROME_PATH"],
+    process.env["GOOGLE_CHROME_SHIM"],
+  ]);
+  if (envPath) return envPath;
+
+  if (platform() === "darwin") {
+    return firstExistingPath([
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    ]);
+  }
+
+  if (platform() === "win32") {
+    return firstExistingPath([
+      process.env["LOCALAPPDATA"]
+        ? join(process.env["LOCALAPPDATA"], "Google/Chrome/Application/chrome.exe")
+        : undefined,
+      process.env["PROGRAMFILES"]
+        ? join(process.env["PROGRAMFILES"], "Google/Chrome/Application/chrome.exe")
+        : undefined,
+      process.env["PROGRAMFILES(X86)"]
+        ? join(process.env["PROGRAMFILES(X86)"], "Google/Chrome/Application/chrome.exe")
+        : undefined,
+      process.env["PROGRAMFILES"]
+        ? join(process.env["PROGRAMFILES"], "Microsoft/Edge/Application/msedge.exe")
+        : undefined,
+    ]);
+  }
+
+  return firstExistingPath([
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ]);
+}
+
+function resolveBrowserExecutablePath(headless: boolean): string | undefined {
+  const chromiumPath = process.env["CHROMIUM_PATH"];
+  if (headless) return chromiumPath;
+  if (chromiumPath && !isHeadlessShellPath(chromiumPath) && existsSync(chromiumPath)) {
+    return chromiumPath;
+  }
+  if (isHeadlessShellPath(chromiumPath)) {
+    agentLogger.warn(
+      "[system] Browser launch requested headless=false; ignoring bundled chromium-headless-shell",
+    );
+  }
+  const headedPath = headedBrowserPath();
+  if (!headedPath) {
+    agentLogger.warn(
+      "[system] Browser launch requested headless=false but no headed Chrome/Chromium path was found",
+    );
+  }
+  return headedPath;
+}
+
 export async function runModule(
   moduleName: string,
   moduleConfig: DbModuleConfig,
@@ -84,12 +152,11 @@ export async function runModule(
 
   const module = getModule(scraperModuleConfig, logger);
 
-  // When running as a bundled .exe, the Tauri shell sets CHROMIUM_PATH to the
-  // chromium-headless-shell sidecar so Playwright doesn't look for its own browser.
-  const chromiumPath = process.env["CHROMIUM_PATH"];
+  const headless = browserOptions?.headless ?? true;
+  const chromiumPath = resolveBrowserExecutablePath(headless);
 
   const browser = new BrowserManager({
-    headless: browserOptions?.headless ?? true,
+    headless,
     slowMo: browserOptions?.slowMo,
     timeout: browserOptions?.timeout ?? 30000,
     executablePath: chromiumPath,
