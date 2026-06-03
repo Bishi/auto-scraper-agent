@@ -920,7 +920,9 @@ function renderDownloadProgress(progress) {
     return;
   }
 
-  const numericProgress = Number.parseInt(String(progress), 10);
+  const progressText = String(progress);
+  const percentMatch = progressText.match(/\((\d{1,3})%\)\s*$/) ?? progressText.match(/^(\d{1,3})%\s*$/);
+  const numericProgress = percentMatch ? Number.parseInt(percentMatch[1], 10) : Number.NaN;
   downloadProgressText.textContent = "Downloading update: " + progress;
   downloadProgressFill.style.width = Number.isFinite(numericProgress) ? `${Math.max(0, Math.min(100, numericProgress))}%` : "0%";
   downloadProgress.style.display = "block";

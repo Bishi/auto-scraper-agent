@@ -167,6 +167,8 @@ The agent checks for updates 15 seconds after launch via the GitHub Releases API
 2. Run `cargo tauri dev` — after ~15 s a dialog should appear offering to download.
 3. Revert the change before committing.
 
+- During a macOS DMG download, the Settings progress bar should track the percent in the progress text, e.g. `100 / 400 MB (25%)` should render around 25%, not full.
+
 CI builds the Windows NSIS installer and macOS DMG, then attaches them to a versioned GitHub Release.
 Download from the Releases page and run the matching installer.
 
