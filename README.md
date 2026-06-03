@@ -22,7 +22,7 @@ You are solely responsible for lawful use and for complying with each target sit
 
 ### First launch
 
-After installing, the agent window opens automatically to the setup screen. The primary setup path is **Pair from Mission Control**: generate a pairing code in the dashboard, enter the Server URL and code in the agent, and click Pair Agent. The server returns an agent ID and one-time agent secret for normal runtime calls. The agent saves these to `~/.auto-scraper/agent.json` and starts the scheduler immediately.
+After installing, the agent window opens automatically to the setup screen. The primary setup path is **Pair from Mission Control**: generate a pairing code in the dashboard, confirm the Server URL, enter the code in the agent, and click Pair Agent. If no URL is saved yet, the app defaults to `https://auto-scraper-develop.up.railway.app`. The server returns an agent ID and one-time agent secret for normal runtime calls. The agent saves these to `~/.auto-scraper/agent.json` and starts the scheduler immediately.
 
 The API-key setup form remains available as a legacy/manual fallback. When used, the API key registers this machine once and is not used for normal runtime calls after the server returns per-device credentials. On all subsequent launches the window opens on the **Agent** tab instead of setup.
 
@@ -160,7 +160,7 @@ signtool sign /f cert.pfx /p <password> `
   "src-tauri\target\release\bundle\nsis\*.exe"
 ```
 
-The CI pipeline handles both Windows signing rounds automatically when `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD` secrets are set in the GitHub repository. macOS CI currently produces an ad-hoc signed DMG artifact suitable for internal testing; public distribution still needs Apple Developer ID signing and notarization secrets.
+The CI pipeline handles both Windows signing rounds automatically when `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD` secrets are set in the GitHub repository. macOS CI currently produces an ad-hoc signed DMG artifact suitable for internal testing. The macOS build includes hardened-runtime entitlements needed by the Node sidecar and bundles Chromium support files such as `icudtl.dat`; public distribution still needs Apple Developer ID signing and notarization secrets.
 
 ### Using CI instead (recommended for releases)
 
@@ -198,7 +198,7 @@ npm test
 
 ## Security
 
-Credentials are never baked into the binary. The setup API key and server URL are entered at first launch and saved only to `~/.auto-scraper/agent.json` on the local machine alongside the registered agent ID and secret. If the Server URL or API key changes, the saved agent credential is discarded and the machine registers again. The local sidecar HTTP server is protected by an ephemeral token so other processes on the machine cannot read credentials or trigger scrapes.
+Credentials are never baked into the binary. First launch uses a Mission Control pairing code and Server URL to create per-device agent credentials saved only to `~/.auto-scraper/agent.json` on the local machine. The legacy API-key setup form remains available for older servers and stores the API key only when explicitly used. The local sidecar HTTP server is protected by an ephemeral token so other processes on the machine cannot read credentials or trigger scrapes.
 
 See [SECURITY.md](SECURITY.md) for the full credential model, sidecar authentication, what is and isn't in the compiled binary, and how to report a vulnerability.
 

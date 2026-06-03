@@ -2,13 +2,24 @@
  * Downloads Playwright's chromium-headless-shell and copies it to
  * src-tauri/binaries/ with the correct Tauri platform triple suffix.
  *
+ * It also copies the browser's runtime support files to src-tauri/resources/.
+ * macOS headless-shell needs files such as icudtl.dat next to the executable.
+ *
  * Run once before `npm run build:tauri`:
  *   node setup-chromium.mjs        (from agent/scraper-node/)
  *   npm run setup:chromium         (via package.json)
  */
 
 import { execSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { arch, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,7 +39,7 @@ function getTargetTriple() {
 // ---------------------------------------------------------------------------
 console.log("Step 1: Installing chromium-headless-shell via Playwright...");
 
-// Run from the repo root so it uses the root node_modules/playwright
+// Run from the repo root so it uses the root node_modules/playwright.
 const repoRoot = join(__dirname, "../..");
 execSync("npx playwright install chromium-headless-shell", {
   cwd: repoRoot,
@@ -41,7 +52,6 @@ execSync("npx playwright install chromium-headless-shell", {
 console.log("Step 2: Locating installed binary...");
 
 function findShellBinary() {
-  // Playwright stores browsers in PLAYWRIGHT_BROWSERS_PATH or the default location.
   const customPath = process.env["PLAYWRIGHT_BROWSERS_PATH"];
 
   const searchRoots = [];
@@ -58,31 +68,25 @@ function findShellBinary() {
 
   for (const root of searchRoots) {
     if (!existsSync(root)) continue;
-    // Match both old (chromium-headless-shell) and new (chromium_headless_shell) naming
-  const dirs = readdirSync(root).filter((d) =>
-    d.startsWith("chromium-headless-shell") || d.startsWith("chromium_headless_shell"),
-  );
-  for (const dir of dirs) {
-    const dirPath = join(root, dir);
-    // Binary name and subfolder have changed across Playwright versions — try all variants
-    const candidates = [
-      // Playwright 1.47+ Windows
-      join(dirPath, "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
-      // Older Windows
-      join(dirPath, "chrome-win", "headless_shell.exe"),
-      // macOS
-      join(dirPath, "chrome-headless-shell-mac-arm64", "chrome-headless-shell"),
-      join(dirPath, "chrome-headless-shell-mac_arm64", "chrome-headless-shell"),
-      join(dirPath, "chrome-headless-shell-mac-x64", "chrome-headless-shell"),
-      join(dirPath, "chrome-mac", "headless_shell"),
-      // Linux
-      join(dirPath, "chrome-headless-shell-linux", "chrome-headless-shell"),
-      join(dirPath, "chrome-linux", "headless_shell"),
-    ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) return candidate;
+    const dirs = readdirSync(root).filter((d) =>
+      d.startsWith("chromium-headless-shell") || d.startsWith("chromium_headless_shell"),
+    );
+    for (const dir of dirs) {
+      const dirPath = join(root, dir);
+      const candidates = [
+        join(dirPath, "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
+        join(dirPath, "chrome-win", "headless_shell.exe"),
+        join(dirPath, "chrome-headless-shell-mac-arm64", "chrome-headless-shell"),
+        join(dirPath, "chrome-headless-shell-mac_arm64", "chrome-headless-shell"),
+        join(dirPath, "chrome-headless-shell-mac-x64", "chrome-headless-shell"),
+        join(dirPath, "chrome-mac", "headless_shell"),
+        join(dirPath, "chrome-headless-shell-linux", "chrome-headless-shell"),
+        join(dirPath, "chrome-linux", "headless_shell"),
+      ];
+      for (const candidate of candidates) {
+        if (existsSync(candidate)) return candidate;
+      }
     }
-  }
   }
   return null;
 }
@@ -91,19 +95,19 @@ const shellSrc = findShellBinary();
 
 if (!shellSrc) {
   const triple = getTargetTriple();
-  console.error("ERROR: Could not locate headless_shell binary after installation.");
+  console.error("ERROR: Could not locate chromium-headless-shell after installation.");
   console.error("Copy it manually from your Playwright browser cache:");
   console.error("  %LOCALAPPDATA%\\ms-playwright\\chromium_headless_shell-*\\chrome-headless-shell-win64\\chrome-headless-shell.exe");
-  console.error(`  → agent/src-tauri/binaries/chromium-headless-shell-${triple}.exe`);
+  console.error(`  -> agent/src-tauri/binaries/chromium-headless-shell-${triple}.exe`);
   process.exit(1);
 }
 
-console.log(`  ✓ Found: ${shellSrc}`);
+console.log(`  Found: ${shellSrc}`);
 
 // ---------------------------------------------------------------------------
-// Step 3: Copy to Tauri binaries
+// Step 3: Copy executable for Tauri externalBin compatibility
 // ---------------------------------------------------------------------------
-console.log("Step 3: Copying to Tauri binaries...");
+console.log("Step 3: Copying executable to Tauri binaries...");
 
 const triple = getTargetTriple();
 const ext = isWin ? ".exe" : "";
@@ -116,5 +120,30 @@ if (!isWin) {
   chmodSync(dest, 0o755);
 }
 
-console.log(`  ✓ src-tauri/binaries/chromium-headless-shell-${triple}${ext}`);
-console.log("\n✅ Chromium headless-shell ready. You can now run: npm run build:tauri");
+console.log(`  src-tauri/binaries/chromium-headless-shell-${triple}${ext}`);
+
+// ---------------------------------------------------------------------------
+// Step 4: Copy runtime support files for bundled execution
+// ---------------------------------------------------------------------------
+console.log("Step 4: Copying Chromium runtime support files...");
+
+const chromiumResourcesDir = join(
+  __dirname,
+  "../src-tauri/resources",
+  `chromium-headless-shell-${triple}`,
+);
+rmSync(chromiumResourcesDir, { recursive: true, force: true });
+mkdirSync(chromiumResourcesDir, { recursive: true });
+cpSync(dirname(shellSrc), chromiumResourcesDir, { recursive: true });
+
+const normalizedResourceBinary = join(
+  chromiumResourcesDir,
+  `chromium-headless-shell${ext}`,
+);
+copyFileSync(shellSrc, normalizedResourceBinary);
+if (!isWin) {
+  chmodSync(normalizedResourceBinary, 0o755);
+}
+
+console.log(`  src-tauri/resources/chromium-headless-shell-${triple}/`);
+console.log("\nChromium headless-shell ready. You can now run: npm run build:tauri");

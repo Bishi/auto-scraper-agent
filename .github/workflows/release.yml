@@ -298,8 +298,10 @@ jobs:
         include:
           - runner: macos-latest
             asset_arch: aarch64
+            target_triple: aarch64-apple-darwin
           - runner: macos-15-intel
             asset_arch: x64
+            target_triple: x86_64-apple-darwin
 
     steps:
       - name: Checkout
@@ -367,10 +369,21 @@ jobs:
         working-directory: scraper-node
         run: node setup-chromium.mjs
 
+      - name: Verify Chromium support files
+        run: test -f "src-tauri/resources/chromium-headless-shell-${{ matrix.target_triple }}/icudtl.dat"
+
       - name: Build Tauri app (macOS DMG)
         env:
           APPLE_SIGNING_IDENTITY: "-"
         run: npm run build:tauri:mac
+
+      - name: Verify macOS app runtime signing
+        run: |
+          APP_PATH="$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$APP_PATH"
+          test -f "$APP_PATH/Contents/Resources/resources/chromium-headless-shell-${{ matrix.target_triple }}/icudtl.dat"
+          codesign -d --entitlements :- "$APP_PATH/Contents/MacOS/scraper-node" 2>&1 | grep -q "com.apple.security.cs.allow-jit"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
       - name: Normalize DMG asset name
         run: |

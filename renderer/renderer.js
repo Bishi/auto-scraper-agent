@@ -1,4 +1,5 @@
 const SIDECAR = "http://127.0.0.1:9001";
+const DEFAULT_SERVER_URL = "https://auto-scraper-develop.up.railway.app";
 const params = new URLSearchParams(window.location.search);
 const isBrowserMock = !window.__TAURI__ || params.get("mock") === "1";
 const mockUpdateMode = params.get("mockUpdate") || "available";
@@ -39,7 +40,7 @@ function createInitialMockUpdateState(mode) {
 const initialMockUpdateState = createInitialMockUpdateState(mockUpdateMode);
 
 const mockState = {
-  serverUrl: "https://local.auto-scraper.test",
+  serverUrl: DEFAULT_SERVER_URL,
   hasApiKey: true,
   hasAgentCredentials: true,
   apiKeyTail: "55f4",
@@ -344,6 +345,8 @@ const pairCodeInput = document.getElementById("pair-code");
 let hasAgentCredentials = false;
 let pairSwitchConfirmArmed = false;
 
+serverInput.value = DEFAULT_SERVER_URL;
+
 function renderPairButton() {
   if (pairBtn.disabled) return;
   pairBtn.textContent = hasAgentCredentials
@@ -373,7 +376,7 @@ async function loadConfig() {
     const res = await fetchTimeout(`${SIDECAR}/config`);
     if (!res.ok) return;
     const data = await res.json();
-    if (data.serverUrl) serverInput.value = data.serverUrl;
+    serverInput.value = data.serverUrl || DEFAULT_SERVER_URL;
     hasAgentCredentials = data.hasAgentCredentials === true;
     resetPairSwitchConfirm();
     if (data.hasApiKey) {

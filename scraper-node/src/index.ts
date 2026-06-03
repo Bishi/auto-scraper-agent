@@ -33,7 +33,8 @@ process.stdout.write(`SIDECAR_TOKEN=${SIDECAR_TOKEN}\n`);
 const BROWSER_PROFILE_DIR = join(homedir(), ".auto-scraper", "browser-profile");
 
 const PORT = 9001;
-const AGENT_VERSION = "0.8.0";
+const AGENT_VERSION = "0.8.1";
+const DEFAULT_SERVER_URL = "https://auto-scraper-develop.up.railway.app";
 const REGISTRATION_RETRY_BASE_MS = 5_000;
 const REGISTRATION_RETRY_MAX_MS = 5 * 60_000;
 const REVOKE_PREVIOUS_CREDENTIALS_TIMEOUT_MS = 5_000;
@@ -270,6 +271,7 @@ const server = http.createServer((req, res) => {
         const config = readConfig();
         return sendJson(res, 200, {
           hasApiKey: !!config?.apiKey,
+          hasAgentCredentials: !!config && hasUsableAgentCredentials(config),
           version: AGENT_VERSION,
         });
       }
@@ -285,7 +287,7 @@ const server = http.createServer((req, res) => {
         // Never expose the full key — same tail convention as admin Fleet (last 4 chars).
         const apiKeyTail = key && key.length >= 4 ? key.slice(-4) : null;
         return sendJson(res, 200, {
-          serverUrl: config?.serverUrl ?? null,
+          serverUrl: config?.serverUrl ?? DEFAULT_SERVER_URL,
           hasApiKey: !!key,
           apiKeyTail,
           hasAgentCredentials: !!config && hasUsableAgentCredentials(config),

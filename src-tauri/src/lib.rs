@@ -40,6 +40,7 @@ static DOWNLOAD_PROGRESS: Mutex<Option<String>> = Mutex::new(None);
 // Captured from sidecar stdout by the watchdog and required on every HTTP request
 // to the sidecar (except OPTIONS preflights and the /health endpoint).
 static SIDECAR_TOKEN: Mutex<Option<String>> = Mutex::new(None);
+const DEFAULT_SERVER_URL: &str = "https://auto-scraper-develop.up.railway.app";
 // Guards the one-time splash + hidden setup window startup flow.
 static INITIAL_OPEN_DONE: AtomicBool = AtomicBool::new(false);
 // Ensures the splash close/show-main handoff only schedules once per startup.
@@ -405,13 +406,42 @@ fn bundled_sidecar_path(name: &str) -> Option<PathBuf> {
     Some(path)
 }
 
-fn with_bundled_chromium_path(command: Command) -> Command {
-    let Some(chromium_path) = bundled_sidecar_path("chromium-headless-shell") else {
-        return command;
-    };
+fn chromium_target_triple() -> &'static str {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    return "x86_64-pc-windows-msvc";
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return "aarch64-apple-darwin";
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    return "x86_64-apple-darwin";
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    return "x86_64-unknown-linux-gnu";
+    #[cfg(not(any(
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+    )))]
+    "unknown"
+}
 
-    if chromium_path.exists() {
-        command.env("CHROMIUM_PATH", chromium_path)
+fn bundled_chromium_resource_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    let path = app
+        .path()
+        .resource_dir()
+        .ok()?
+        .join("resources")
+        .join(format!("chromium-headless-shell-{}", chromium_target_triple()))
+        .join(format!("chromium-headless-shell{ext}"));
+    path.exists().then_some(path)
+}
+
+fn with_bundled_chromium_path<R: Runtime>(app: &AppHandle<R>, command: Command) -> Command {
+    let chromium_path = bundled_chromium_resource_path(app)
+        .or_else(|| bundled_sidecar_path("chromium-headless-shell").filter(|path| path.exists()));
+
+    if let Some(path) = chromium_path {
+        command.env("CHROMIUM_PATH", path)
     } else {
         command
     }
@@ -421,6 +451,8 @@ fn with_bundled_chromium_path(command: Command) -> Command {
 struct HealthResponse {
     #[serde(rename = "hasApiKey")]
     has_api_key: bool,
+    #[serde(rename = "hasAgentCredentials", default)]
+    has_agent_credentials: bool,
 }
 
 #[derive(Deserialize)]
@@ -1033,7 +1065,7 @@ fn handle_update_available(app: &AppHandle, latest_tag: &str) {
     }
 }
 
-fn sidecar_has_api_key() -> bool {
+fn sidecar_has_config() -> bool {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
@@ -1044,7 +1076,7 @@ fn sidecar_has_api_key() -> bool {
                 .ok()
                 .and_then(|r| r.json::<HealthResponse>().ok())
         })
-        .map(|h| h.has_api_key)
+        .map(|h| h.has_api_key || h.has_agent_credentials)
         .unwrap_or(false)
 }
 
@@ -1060,7 +1092,7 @@ fn sidecar_server_url() -> String {
                 .and_then(|r| r.json::<serde_json::Value>().ok())
         })
         .and_then(|v| v["serverUrl"].as_str().map(String::from))
-        .unwrap_or_else(|| "http://localhost:3000".to_string())
+        .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string())
 }
 
 fn startup_setup_tab<R: Runtime>(app: &AppHandle<R>) -> Option<&'static str> {
@@ -1076,7 +1108,17 @@ fn startup_setup_tab<R: Runtime>(app: &AppHandle<R>) -> Option<&'static str> {
         .and_then(|value| value.as_str())
         .map(|value| !value.is_empty())
         .unwrap_or(false);
-    if has_api_key {
+    let has_agent_credentials = parsed
+        .get("agentId")
+        .and_then(|value| value.as_str())
+        .map(|value| !value.is_empty())
+        .unwrap_or(false)
+        && parsed
+            .get("agentSecret")
+            .and_then(|value| value.as_str())
+            .map(|value| !value.is_empty())
+            .unwrap_or(false);
+    if has_api_key || has_agent_credentials {
         Some("logs")
     } else {
         None
@@ -1357,7 +1399,7 @@ pub fn run() {
                 .shell()
                 .sidecar("scraper-node")
                 .expect("scraper-node sidecar not configured");
-            let sidecar_cmd = with_bundled_chromium_path(sidecar_cmd);
+            let sidecar_cmd = with_bundled_chromium_path(app.handle(), sidecar_cmd);
 
             let (rx, child) = sidecar_cmd
                 .spawn()
@@ -1423,7 +1465,7 @@ pub fn run() {
                     match watchdog_handle
                         .shell()
                         .sidecar("scraper-node")
-                        .map(with_bundled_chromium_path)
+                        .map(|command| with_bundled_chromium_path(&watchdog_handle, command))
                         .and_then(|c| c.spawn())
                     {
                         Ok((new_rx, new_child)) => {
@@ -1459,9 +1501,9 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        // Left-click always opens/focuses the window. When no API
-                        // key is saved yet, open on Settings; otherwise open on Logs.
-                        let tab = if sidecar_has_api_key() { Some("logs") } else { None };
+                        // Left-click always opens/focuses the window. When no saved
+                        // credentials exist yet, open on Settings; otherwise open on Logs.
+                        let tab = if sidecar_has_config() { Some("logs") } else { None };
                         open_setup_window(&app_handle_tray, tab);
                     }
                 })

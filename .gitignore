@@ -9,6 +9,9 @@ src-tauri/gen/
 
 # Sidecar binaries (built by `npm run build:sidecar` and `node setup-chromium.mjs`)
 src-tauri/binaries/
+src-tauri/resources/chromium-headless-shell-*/
+!src-tauri/resources/chromium-headless-shell-placeholder/
+!src-tauri/resources/chromium-headless-shell-placeholder/.gitkeep
 
 # Generated icon source (kept for reproducibility but not needed in repo)
 src-tauri/icons/_source.png

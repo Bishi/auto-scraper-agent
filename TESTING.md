@@ -55,6 +55,8 @@ curl -X POST http://127.0.0.1:9001/pairing/consume \
 
 The next authenticated server call confirms the pending paired device. If the consume response is lost before that first authenticated call, generate a new code in Mission Control.
 
+The packaged setup UI defaults an empty Server URL to `https://auto-scraper-develop.up.railway.app`. Local curl tests can still use `http://localhost:3000` when testing against a local server.
+
 Legacy/manual API-key registration:
 
 ```bash
@@ -64,7 +66,7 @@ curl -X POST http://127.0.0.1:9001/config \
   -d '{"apiKey":"<your-api-key>","serverUrl":"http://localhost:3000"}'
 ```
 
-Expected sidecar log on first setup or after changing Server URL/API key:
+Expected sidecar log after legacy/manual setup or changing the legacy Server URL/API key:
 
 ```
 [agent] Registered device <agentId>
@@ -104,6 +106,15 @@ node build.mjs               # produces dist/scraper-node.exe on Windows, dist/s
 
 If it prints the listening line, proceed to tag.
 If it crashes, fix the issue in `build.mjs` or the source before tagging.
+
+### macOS bundle smoke checks
+
+After a macOS build, install the DMG on a clean Mac and confirm:
+
+1. The splash screen clears and the sidecar listens on `127.0.0.1:9001`.
+2. `codesign -d --entitlements :- "/Applications/Auto-Scraper Agent.app/Contents/MacOS/scraper-node"` includes `com.apple.security.cs.allow-jit`.
+3. `"/Applications/Auto-Scraper Agent.app/Contents/Resources/resources/chromium-headless-shell-*/icudtl.dat"` exists.
+4. A manual scrape can launch bundled Chromium without `icudtl.dat not found` or `SIGTRAP` browser logs.
 
 ## 6. Tag a release
 
@@ -228,7 +239,7 @@ See [`docs/agent-command-lifecycle.md`](docs/agent-command-lifecycle.md) for the
 ### Existing lifecycle checks
 
 1. App appears in system tray
-2. Setup window opens (or skips if API key already saved)
+2. Setup window opens (or skips if agent credentials are already saved)
 3. "Run Now" tray menu item triggers a scrape
 4. Dashboard shows the new scrape run with listings
 5. Tray tooltip shows next scrape time (updates after each completed run)

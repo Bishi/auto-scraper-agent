@@ -115,24 +115,25 @@ button.primary,button.secondary,button.run,button.stop,button.ghost,button.dange
                   <div class="section settings-pane">
                     <div class="field">
                       <label for="server-url">Server URL</label>
-                      <input id="server-url" type="url" placeholder="https://your-server.vercel.app" autocomplete="off" spellcheck="false" />
+                      <input id="server-url" type="url" placeholder="https://auto-scraper-develop.up.railway.app" autocomplete="off" spellcheck="false" />
                     </div>
 
                     <div class="field">
-                      <label for="api-key">API Key</label>
-                      <input id="api-key" type="password" placeholder="as_live_..." autocomplete="off" spellcheck="false" />
-                      <div class="hint" id="key-hint" style="display:none">A key is already saved. Leave blank to keep it.</div>
-                    </div>
-
-                    <button class="primary" id="save-btn">Save</button>
-
-                    <div class="field" style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
                       <div class="field-label">Pair from Mission Control</div>
                       <input id="pair-code" type="text" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code" />
-                      <div class="hint">Generate a code in Mission Control, then enter it here. API key setup remains available as the legacy/manual fallback.</div>
+                      <div class="hint">Generate a code in Mission Control, then enter it here. No API key is needed.</div>
                     </div>
 
-                    <button class="secondary" id="pair-btn">Pair Agent</button>
+                    <button class="primary" id="pair-btn">Pair Agent</button>
+
+                    <div class="field" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
+                      <label for="api-key">Legacy API Key</label>
+                      <input id="api-key" type="password" placeholder="as_live_..." autocomplete="off" spellcheck="false" />
+                      <div class="hint" id="key-hint" style="display:none">A key is already saved. Leave blank to keep it.</div>
+                      <div class="hint">Only use this for older servers that do not support Mission Control pairing.</div>
+                    </div>
+
+                    <button class="secondary" id="save-btn">Save legacy key</button>
 
                     <div class="settings-feedback">
                       <div class="alert error" id="error-msg"></div>
