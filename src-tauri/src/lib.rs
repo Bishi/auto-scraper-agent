@@ -409,16 +409,6 @@ fn bundled_sidecar_path(name: &str) -> Option<PathBuf> {
     Some(path)
 }
 
-fn sidecar_health_available(timeout: Duration) -> bool {
-    reqwest::blocking::Client::builder()
-        .timeout(timeout)
-        .build()
-        .ok()
-        .and_then(|client| client.get("http://127.0.0.1:9001/health").send().ok())
-        .map(|response| response.status().is_success())
-        .unwrap_or(false)
-}
-
 fn store_sidecar_child(child: CommandChild) {
     if let Ok(mut guard) = SIDECAR_CHILD.lock() {
         if let Some(previous) = guard.take() {
@@ -444,30 +434,91 @@ fn kill_owned_sidecar_child() {
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
+    let mut command = StdCommand::new(program);
+    command.args(args);
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(target_os = "windows")]
+fn stale_sidecar_pids_on_port() -> Vec<String> {
+    let Some(output) = command_stdout("netstat", &["-ano", "-p", "tcp"]) else {
+        return Vec::new();
+    };
+
+    output
+        .lines()
+        .filter(|line| line.contains("127.0.0.1:9001") && line.contains("LISTENING"))
+        .filter_map(|line| line.split_whitespace().last())
+        .filter(|pid| {
+            command_stdout("tasklist", &["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+                .map(|details| details.to_ascii_lowercase().contains("\"scraper-node.exe\""))
+                .unwrap_or(false)
+        })
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn stale_sidecar_pids_on_port() -> Vec<String> {
+    let Some(output) = command_stdout("lsof", &["-nP", "-tiTCP:9001", "-sTCP:LISTEN"]) else {
+        return Vec::new();
+    };
+
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|pid| !pid.is_empty())
+        .filter(|pid| {
+            command_stdout("ps", &["-p", pid, "-o", "comm="])
+                .map(|details| details.lines().any(|line| line.trim().ends_with("scraper-node")))
+                .unwrap_or(false)
+        })
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn stale_sidecar_pids_on_port() -> Vec<String> {
+    Vec::new()
+}
+
 fn cleanup_stale_sidecar_before_spawn() {
-    if !sidecar_health_available(Duration::from_millis(350)) {
+    let pids = stale_sidecar_pids_on_port();
+    if pids.is_empty() {
         return;
     }
 
-    eprintln!("[agent] Found an existing sidecar on 127.0.0.1:9001; replacing it before startup.");
+    eprintln!(
+        "[agent] Found an existing sidecar on 127.0.0.1:9001 (PID {}); replacing it before startup.",
+        pids.join(", ")
+    );
 
     #[cfg(target_os = "macos")]
     {
-        if let Some(path) = bundled_sidecar_path("scraper-node") {
-            let _ = StdCommand::new("pkill")
-                .arg("-f")
-                .arg(path.to_string_lossy().as_ref())
-                .status();
+        for pid in &pids {
+            let _ = StdCommand::new("kill").args(["-KILL", pid]).status();
         }
         let _ = std::fs::remove_file("/tmp/com_autoscraper_agent_si.sock");
     }
 
     #[cfg(target_os = "windows")]
     {
-        let _ = StdCommand::new("taskkill")
-            .args(["/F", "/IM", "scraper-node.exe"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
+        for pid in &pids {
+            let _ = StdCommand::new("taskkill")
+                .args(["/F", "/PID", pid])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+        }
     }
 
     thread::sleep(Duration::from_millis(700));

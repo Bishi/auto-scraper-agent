@@ -39,10 +39,10 @@ function getTargetTriple() {
 // ---------------------------------------------------------------------------
 console.log("Step 1: Installing chromium-headless-shell via Playwright...");
 
-// Run from the repo root so it uses the root node_modules/playwright.
-const repoRoot = join(__dirname, "../..");
+// Run from scraper-node so npx resolves the locked Playwright dependency from
+// scraper-node/package-lock.json instead of fetching an unpinned root fallback.
 execSync("npx playwright install chromium-headless-shell", {
-  cwd: repoRoot,
+  cwd: __dirname,
   stdio: "inherit",
 });
 

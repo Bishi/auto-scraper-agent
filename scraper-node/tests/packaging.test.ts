@@ -49,8 +49,17 @@ describe("packaged setup and macOS runtime wiring", () => {
     expect(tauriLib).toContain("static SIDECAR_CHILD");
     expect(tauriLib).toContain("store_sidecar_child(child)");
     expect(tauriLib).toContain("shutdown_sidecar_for_app_exit()");
+    expect(tauriLib).toContain("stale_sidecar_pids_on_port()");
+    expect(tauriLib).toContain("\"/PID\"");
     expect(tauriLib).not.toContain("std::mem::forget(child)");
     expect(tauriLib).not.toContain("std::mem::forget(new_child)");
+  });
+
+  it("installs Chromium through scraper-node's locked Playwright dependency", async () => {
+    const setupChromium = await readRepoFile("scraper-node/setup-chromium.mjs");
+
+    expect(setupChromium).toContain("cwd: __dirname");
+    expect(setupChromium).not.toContain("const repoRoot = join(__dirname, \"../..\")");
   });
 
   it("does not reuse the bundled headless shell for headed browser mode", async () => {
